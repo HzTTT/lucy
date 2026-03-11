@@ -10,7 +10,8 @@ This package has no standalone build script; OpenClaw loads `index.ts` directly 
 
 - `npm install` in this directory installs Lucy's dependencies when working outside the workspace.
 - From the parent OpenClaw root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d` starts OpenClaw plus the local NATS broker.
-- From the parent root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe` verifies Lucy and prints the generated `deviceId`.
+- From the parent root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe` verifies Lucy's human-readable health status.
+- From the parent root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` prints the stable machine-readable `deviceId` / subjects / media probe fields.
 - From the parent root: `bun extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <deviceId>` opens the demo client.
 - From the parent root: `pnpm test:extensions` or `vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"` runs extension tests.
 
@@ -30,7 +31,8 @@ Use a boundary-first workflow. Prove the cheapest layer first, then move outward
 
 3. Separate framework/config failure from plugin failure.
 - Read gateway logs before changing code.
-- Use `channels status --probe` after each meaningful change.
+- Use `channels status --probe` after each meaningful change for human health checks.
+- Use `gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` when you need stable machine-readable `deviceId` / subjects / media probe fields.
 - If status says `configured, works, stopped`, inspect Lucy lifecycle code before transport wiring.
 - If the gateway is crash-looping, do not depend on `openclaw-cli` containers that share `network_mode: service:openclaw-gateway`; inspect or edit the mounted config directly.
 
@@ -61,6 +63,7 @@ Run these from the OpenClaw root unless noted otherwise.
 - Start local stack with stable temp dirs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d nats openclaw-gateway`
 - Inspect gateway logs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml logs openclaw-gateway --tail=200`
 - Probe channel runtime: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe`
+- Stable JSON probe fields: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json`
 - Inspect runtime deps in container: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml exec openclaw-gateway ls -la /app/extensions/lucy/node_modules`
 - Demo client: `node_modules/.bin/tsx extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <deviceId>`
 
@@ -101,5 +104,5 @@ Never commit real `apiKey`, NATS credentials, or generated `deviceId` values. Us
 
 - `docker build` must receive `--build-arg OPENCLAW_EXTENSIONS=lucy`; setting only a shell env var is not enough for the Dockerfile path that installs extension deps.
 - For bus-backed adapters such as Lucy, account startup should stay blocked until `abortSignal`. Spawning a background loop and returning early can trigger OpenClaw auto-restart and duplicate inbound handling.
-- A green build is not enough. Always check the running container filesystem and `channels status --probe`.
+- A green build is not enough. Always check the running container filesystem and `channels status --probe`; when scripting against Lucy probe fields, prefer `gateway call channels.status ... --json`.
 - When the gateway container is already restarting, prefer fixing the mounted config file directly over trying to use dependent CLI containers.

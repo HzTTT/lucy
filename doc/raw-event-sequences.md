@@ -1,5 +1,9 @@
 # Lucy Docker Raw Event Sequences
 
+> 说明
+> 本文档记录的是一次特定 Docker 联调中的原始事件样本，适合用来观察事件顺序。
+> 它不是协议 schema 的权威来源。如果字段或版本与主文档不一致，请以 `doc/app-nats-integration.md` 和 `src/types.ts` 为准。
+
 Run date: 2026-03-10T16:41:40.371Z
 
 Runtime:
