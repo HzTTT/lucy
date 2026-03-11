@@ -1,0 +1,33 @@
+{
+  "name": "@hzttt/lucy",
+  "version": "2026.3.10",
+  "description": "OpenClaw Lucy NATS DM channel plugin",
+  "type": "module",
+  "dependencies": {
+    "nats": "^2.29.3",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "openclaw": "*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "lucy",
+      "label": "Lucy",
+      "selectionLabel": "Lucy (NATS DM)",
+      "docsPath": "/channels/lucy",
+      "docsLabel": "lucy",
+      "blurb": "DM-only chat over NATS subjects scoped by apiKey and deviceId.",
+      "order": 95
+    },
+    "install": {
+      "npmSpec": "@openclaw/lucy",
+      "localPath": "extensions/lucy",
+      "defaultChoice": "npm"
+    }
+  }
+}

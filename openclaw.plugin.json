@@ -1,0 +1,11 @@
+{
+  "id": "lucy",
+  "name": "Lucy",
+  "description": "Lucy NATS DM channel plugin",
+  "channels": ["lucy"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

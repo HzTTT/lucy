@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "openclaw-channel-dev": {
+      "source": "/Users/hongzaitou/.claude/skills/openclaw-channel-dev",
+      "sourceType": "local",
+      "computedHash": "e0b0b5827dc22b7d87d541c287460cef8884247e4c347c705de34e9a0551dd69"
+    }
+  }
+}

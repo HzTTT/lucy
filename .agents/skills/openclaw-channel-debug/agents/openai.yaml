@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw Channel Debug"
+  short_description: "Debug Docker, runtime, and transport failures."
+  default_prompt: "Use $openclaw-channel-debug to debug an OpenClaw channel plugin that builds but does not run correctly."
