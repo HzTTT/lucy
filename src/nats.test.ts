@@ -24,6 +24,9 @@ function createAccount(server: string): ResolvedLucyAccount {
     token: "secret-token",
     dmPolicy: "allowlist",
     allowFrom: ["demo_user"],
+    mediaBucket: "lucy_media_v2",
+    mediaRetentionHours: 168,
+    mediaMaxBytes: 20 * 1024 * 1024,
   };
 }
 

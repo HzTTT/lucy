@@ -4,8 +4,29 @@ export const LUCY_CHANNEL_ID = "lucy";
 export const DEFAULT_ACCOUNT_ID = "default";
 export const DEFAULT_SUBJECT_PREFIX = "cephalon.im.npc";
 export const DEFAULT_NATS_SERVER = "nats://127.0.0.1:4222";
+export const DEFAULT_MEDIA_BUCKET = "lucy_media_v2";
+export const DEFAULT_MEDIA_RETENTION_HOURS = 168;
+export const DEFAULT_MEDIA_MAX_MB = 20;
 export const DEVICE_STATE_VERSION = 1;
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
+export const OBJECT_STORE_BUCKET_RE = /^[-\w]+$/;
+export const OBJECT_STORE_KEY_RE = /^[-/=.\w]+$/;
+export const LUCY_MEDIA_TRANSPORT = "jetstream-object-store";
+
+export const LucyMessageIdSchema = z.string().regex(/^\d{19}$/);
+export const LucyMetadataSchema = z.record(z.string(), z.unknown());
+export const LucyMediaKindSchema = z.enum(["image", "audio"]);
+
+export const LucyMediaDescriptorSchema = z.object({
+  transport: z.literal(LUCY_MEDIA_TRANSPORT),
+  bucket: z.string().regex(OBJECT_STORE_BUCKET_RE),
+  key: z.string().regex(OBJECT_STORE_KEY_RE),
+  kind: LucyMediaKindSchema,
+  contentType: z.string().min(1).optional(),
+  size: z.number().int().nonnegative(),
+  fileName: z.string().min(1).optional(),
+  sha256: z.string().min(1).optional(),
+});
 
 export const LucyDmPolicySchema = z.enum(["allowlist", "open", "disabled"]);
 
@@ -20,27 +41,52 @@ export const LucyConfigSchema = z.object({
   password: z.string().min(1).optional(),
   dmPolicy: LucyDmPolicySchema.optional(),
   allowFrom: z.array(z.string().min(1)).optional(),
+  mediaBucket: z.string().regex(OBJECT_STORE_BUCKET_RE).optional(),
+  mediaRetentionHours: z.number().int().positive().optional(),
+  mediaMaxMb: z.number().positive().optional(),
 });
 
 export type LucyConfig = z.infer<typeof LucyConfigSchema>;
 export type LucyDmPolicy = z.infer<typeof LucyDmPolicySchema>;
+export type LucyMediaKind = z.infer<typeof LucyMediaKindSchema>;
+export type LucyMediaDescriptor = z.infer<typeof LucyMediaDescriptorSchema>;
 
-export const LucyInboundMessageSchema = z.object({
+export const LucyInboundMessageV1Schema = z.object({
   version: z.literal(1),
-  messageId: z
-    .string()
-    .regex(/^\d{19}$/)
-    .optional(),
+  messageId: LucyMessageIdSchema.optional(),
   text: z.string(),
   timestamp: z.number().int().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: LucyMetadataSchema.optional(),
   apiKey: z.string().optional(),
-  deviceId: z
-    .string()
-    .regex(/^\d{19}$/)
-    .optional(),
+  deviceId: LucyMessageIdSchema.optional(),
 });
 
+export const LucyInboundMessageV2Schema = z
+  .object({
+    version: z.literal(2),
+    messageId: LucyMessageIdSchema.optional(),
+    text: z.string().optional(),
+    media: LucyMediaDescriptorSchema.optional(),
+    timestamp: z.number().int().optional(),
+    metadata: LucyMetadataSchema.optional(),
+    apiKey: z.string().optional(),
+    deviceId: LucyMessageIdSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasText = Boolean(value.text?.trim());
+    if (!hasText && !value.media) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "text or media is required",
+        path: ["text"],
+      });
+    }
+  });
+
+export const LucyInboundMessageSchema = z.union([LucyInboundMessageV2Schema, LucyInboundMessageV1Schema]);
+
+export type LucyInboundMessageV1 = z.infer<typeof LucyInboundMessageV1Schema>;
+export type LucyInboundMessageV2 = z.infer<typeof LucyInboundMessageV2Schema>;
 export type LucyInboundMessage = z.infer<typeof LucyInboundMessageSchema>;
 
 export const LucyMachineEventTypeSchema = z.enum([
@@ -58,21 +104,19 @@ export const LucyMachineEventTypeSchema = z.enum([
 export type LucyMachineEventType = z.infer<typeof LucyMachineEventTypeSchema>;
 
 export const LucyMachineEventSchema = z.object({
-  version: z.literal(1),
-  eventId: z.string().regex(/^\d{19}$/),
+  version: z.literal(2),
+  eventId: LucyMessageIdSchema,
   type: LucyMachineEventTypeSchema,
   timestamp: z.number().int(),
   apiKey: z.string(),
-  deviceId: z.string().regex(/^\d{19}$/),
-  sourceMessageId: z
-    .string()
-    .regex(/^\d{19}$/)
-    .optional(),
+  deviceId: LucyMessageIdSchema,
+  sourceMessageId: LucyMessageIdSchema.optional(),
   runId: z.string().optional(),
   sessionKey: z.string().optional(),
   text: z.string().optional(),
   toolName: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: LucyMetadataSchema.optional(),
+  media: LucyMediaDescriptorSchema.optional(),
 });
 
 export type LucyMachineEvent = z.infer<typeof LucyMachineEventSchema>;
@@ -96,6 +140,9 @@ export type ResolvedLucyAccount = {
   password?: string;
   dmPolicy: LucyDmPolicy;
   allowFrom: string[];
+  mediaBucket: string;
+  mediaRetentionHours: number;
+  mediaMaxBytes: number;
 };
 
 export type LucySubjects = {
@@ -109,4 +156,6 @@ export type LucyProbe = {
   clientSubject: string;
   machineSubject: string;
   deviceId: string;
+  mediaBucket: string;
+  mediaRetentionHours: number;
 };

@@ -5,11 +5,13 @@ describe("lucyPlugin", () => {
   it("declares a DM-only channel", () => {
     expect(lucyPlugin.id).toBe("lucy");
     expect(lucyPlugin.capabilities.chatTypes).toEqual(["direct"]);
+    expect(lucyPlugin.capabilities.media).toBe(true);
     expect(lucyPlugin.capabilities.blockStreaming).toBe(true);
   });
 
   it("exposes a direct outbound adapter", () => {
     expect(lucyPlugin.outbound?.deliveryMode).toBe("direct");
+    expect(lucyPlugin.outbound?.sendMedia).toBeTypeOf("function");
     expect(lucyPlugin.gateway?.startAccount).toBeTypeOf("function");
   });
 });

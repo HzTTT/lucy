@@ -2,24 +2,31 @@ import type { NatsConnection } from "nats";
 import { connectLucyNats, buildLucySubjects, encodeLucyMachineEvent } from "./nats.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { loadOrCreateLucyDeviceState } from "./state.js";
-import type { LucyMachineEvent, LucyMachineEventType, ResolvedLucyAccount } from "./types.js";
+import type {
+  LucyMachineEvent,
+  LucyMachineEventType,
+  LucyMediaDescriptor,
+  ResolvedLucyAccount,
+} from "./types.js";
 
 type BuildMachineEventParams = {
   account: ResolvedLucyAccount;
   deviceId: string;
   type: LucyMachineEventType;
+  eventId?: string;
   sourceMessageId?: string;
   runId?: string;
   sessionKey?: string;
   text?: string;
   toolName?: string;
   metadata?: Record<string, unknown>;
+  media?: LucyMediaDescriptor;
 };
 
 export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMachineEvent {
   return {
-    version: 1,
-    eventId: getProcessSnowflakeGenerator().nextId(),
+    version: 2,
+    eventId: params.eventId ?? getProcessSnowflakeGenerator().nextId(),
     type: params.type,
     timestamp: Date.now(),
     apiKey: params.account.apiKey ?? "",
@@ -30,6 +37,7 @@ export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMach
     text: params.text,
     toolName: params.toolName,
     metadata: params.metadata,
+    media: params.media,
   };
 }
 
@@ -38,12 +46,14 @@ export async function publishLucyMachineEvent(params: {
   connection?: NatsConnection;
   deviceId?: string;
   type: LucyMachineEventType;
+  eventId?: string;
   sourceMessageId?: string;
   runId?: string;
   sessionKey?: string;
   text?: string;
   toolName?: string;
   metadata?: Record<string, unknown>;
+  media?: LucyMediaDescriptor;
 }): Promise<LucyMachineEvent> {
   if (!params.account.apiKey) {
     throw new Error("lucy apiKey is not configured");
