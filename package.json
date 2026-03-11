@@ -3,6 +3,10 @@
   "version": "2026.3.10",
   "description": "OpenClaw Lucy NATS DM channel plugin",
   "type": "module",
+  "main": "./index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "nats": "^2.29.3",
     "ws": "^8.19.0",
@@ -25,7 +29,7 @@
       "order": 95
     },
     "install": {
-      "npmSpec": "@openclaw/lucy",
+      "npmSpec": "@hzttt/lucy",
       "localPath": "extensions/lucy",
       "defaultChoice": "npm"
     }

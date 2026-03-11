@@ -1,0 +1,8 @@
+.agents/
+AGENTS.md
+doc/
+docker-compose.nats.yml
+docker-forwarding-report.md
+scripts/
+skills-lock.json
+src/*.test.ts
