@@ -285,7 +285,7 @@ descriptor 定义：
 | `timestamp`       | 毫秒时间戳                                    |
 | `apiKey`          | 当前命名空间                                   |
 | `deviceId`        | 当前 Lucy 实例 id                            |
-| `sourceMessageId` | 对应的入站消息 id                               |
+| `sourceMessageId` | 对应的入站消息 id；对工具主动推送或系统主动发送的事件，这个字段可能缺失 |
 | `runId`           | 当前 OpenClaw 执行 id                        |
 | `sessionKey`      | 当前 OpenClaw 会话键                          |
 | `text`            | 文本内容，不是每种事件都有                            |
@@ -317,6 +317,7 @@ descriptor 定义：
 - `assistant.final` 可能不止一条，必须按接收顺序写入历史
 - `assistant.final.media` 才是“返回了媒体”的权威信号
 - `assistant.partial` 中可能短暂看到 `MEDIA:` 指令文本，不应据此下载媒体
+- 某些工具主动推送出来的 `assistant.final` 可能没有 `sourceMessageId`；这类事件仍然是合法的，应按 `runId` 或 `eventId` 单独落成一条独立 assistant 消息，而不是直接丢弃
 
 ## 7. 媒体返回协议
 
@@ -411,6 +412,12 @@ Lucy 当前没有单独的 `assistant.done` 事件。更稳妥的完成判定是
 4. 若没有新事件，再把这轮对话标记为完成
 
 建议空闲窗口：`1000ms` 到 `2000ms`。
+
+如果 `assistant.final` 缺少 `sourceMessageId`：
+
+1. 不要把它当成非法事件直接忽略
+2. 可优先用 `runId` 聚合；若 `runId` 也没有，再退化到 `eventId`
+3. 这类消息通常来自工具主动推送或服务端主动发送，不一定对应某条用户入站消息
 
 ## 9. 文本清洗与防御性渲染
 

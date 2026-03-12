@@ -54,6 +54,37 @@ Use this skill to isolate whether a channel failure lives in plugin code, gatewa
 - Provider 401 or missing API key: model auth or wrong provider config.
 - No `inbound.accepted`: subject mapping, bus reachability, or channel not running.
 
+8. For media bugs, split the path into 4 boundaries and prove each one separately.
+- Boundary A, inbound upload: verify the client can upload to Object Store and still get `inbound.accepted`.
+- Boundary B, upstream generation: verify whether the model/agent actually emits `assistant.final.media`; do not infer this from a tool result or control-UI transcript.
+- Boundary C, outbound channel send: inspect `~/.openclaw/delivery-queue` for failed media sends and read `lastError` before touching plugin code.
+- Boundary D, client render/grouping: if a raw `assistant.final` with `media` exists on the wire, the remaining bug is in the client.
+
+9. Treat `delivery-queue` as the source of truth for local-path media failures.
+- For local installs, inspect `~/.openclaw/delivery-queue/*.json` and `~/.openclaw/delivery-queue/failed/*.json`.
+- If `lastError` says `Local media path is not under an allowed directory`, the bug is neither transport nor provider auth.
+- Default safe roots come from OpenClaw state/workspace/tmp roots; a path like `/home/<user>/data/...` will be rejected unless the sender first copies it into an allowed root.
+
+10. Capture raw machine events before claiming a media reply exists.
+- Subscribe directly to the channel `machine` subject and log the full JSON.
+- Confirm whether the photo reply is a real `assistant.final` with a `media` descriptor, or only a tool result mentioning `mediaUrl`.
+- A control-UI or tool transcript that shows `mediaUrl` is not proof the channel client ever received a media event.
+
+11. Watch for direct-send events that do not carry `sourceMessageId`.
+- Tool-driven outbound sends such as `message(action=send, filePath=...)` may emit a standalone `assistant.final` with `media` but without `sourceMessageId`.
+- If the raw machine event has `media` and no `sourceMessageId`, transport is healthy; clients that key strictly by `sourceMessageId` will silently drop the image.
+- Fix the client grouping/rendering path before blaming Lucy.
+
+12. Normalize target ids before building subjects.
+- Inspect actual outbound `to` values in tool results and delivery payloads.
+- If a tool emits `lucy:demo_user` but the client subscribes to `demo_user`, strip the `lucy:` prefix before computing subjects.
+- A subject namespace mismatch can make media appear to "send successfully" while landing on the wrong subject.
+
+13. For non-Docker local installs, prefer local-state inspection over container workflows.
+- Check `~/.openclaw/openclaw.json` for the active channel config.
+- Check `~/.openclaw/extensions/<id>` for the deployed plugin version and source.
+- Use `journalctl --user-unit openclaw-gateway` (or the system unit if applicable) for runtime logs when `~/.openclaw/logs` does not contain gateway output.
+
 ## Exit Criteria
 
 Consider the debug complete only when all of these are true:
@@ -62,6 +93,7 @@ Consider the debug complete only when all of these are true:
 - `docker compose ... ps` shows the bus and gateway up.
 - `channels status --probe` shows the channel `running` and `works`.
 - A raw transport probe yields `inbound.accepted` and at least one assistant event.
+- For media incidents, a raw transport probe must also answer whether `assistant.final.media` is present, absent, or rejected before the client sees it.
 - Any remaining failure is clearly upstream of the channel, such as provider auth.
 
 ## Common Pitfalls

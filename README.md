@@ -300,6 +300,8 @@ Lucy 将文本/控制事件和媒体字节分开处理。
 - 默认保留时间为 7 天
 - 当前每个 `assistant.final` 最多只包含一个媒体对象
 - 如有多个候选媒体，丢弃计数可能出现在 `metadata.droppedMediaCount`
+- 如果 `mediaUrl` / `mediaUrls` 是本地路径，这个路径必须先落在 OpenClaw 允许的本地媒体根目录内；典型允许根包括 `~/.openclaw/media`、`~/.openclaw/workspace`、`~/.openclaw/agents`、`~/.openclaw/sandboxes` 和 OpenClaw tmp 目录。直接引用 `/home/.../data/...` 这类路径会在真正上传到 Object Store 之前被 OpenClaw 安全检查拒绝
+- 如果上游通过 `message` 工具把图片主动推送到 Lucy，工具里常见的目标写法是 `lucy:<apiKey>`；Lucy 会把它归一化到 `<apiKey>` 对应的命名空间再发到 machine subject
 
 详细 schema 与事件语义请看 `[doc/app-nats-integration.md](doc/app-nats-integration.md)`。
 
@@ -331,6 +333,7 @@ docker build --build-arg OPENCLAW_EXTENSIONS=lucy -t openclaw:local -f Dockerfil
 | `Cannot find module 'nats'`     | 运行时依赖可见性问题，不是 TypeScript 问题        | 检查容器内 `/app/extensions/lucy/node_modules` 与 `/app/node_modules` |
 | 没有 `inbound.accepted`           | subject、NATS 连通性或 Lucy listener 异常 | 先验证 probe 输出与 App 实际 subject 是否一致                               |
 | 出现 `assistant.final` 但内容是上游鉴权失败 | Lucy 传输层健康                         | 转去检查 provider 配置                                                |
+| `Local media path is not under an allowed directory` | 上游生成了一个不在可信根目录内的本地 `mediaUrl` | 先把文件复制到 `~/.openclaw/media` 或 agent workspace 再发送，不要直接引用任意 `/home/...` 路径 |
 | 同一条入站消息出现重复 accepted/final      | 可能是 Gateway 自动重启导致重复监听             | 排查 listener 生命周期与容器重启                                           |
 
 
