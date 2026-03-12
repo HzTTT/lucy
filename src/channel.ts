@@ -14,6 +14,14 @@ import { publishLucyMachineEvent } from "./send.js";
 import { loadOrCreateLucyDeviceState } from "./state.js";
 import { DEFAULT_ACCOUNT_ID, type LucyProbe, type ResolvedLucyAccount } from "./types.js";
 
+export function normalizeLucyOutboundTarget(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.replace(/^lucy:/i, "").trim() || undefined;
+}
+
 async function publishLucyOutboundAssistantFinal(params: {
   cfg: OpenClawConfig;
   to: string;
@@ -28,7 +36,7 @@ async function publishLucyOutboundAssistantFinal(params: {
   }
 
   const deviceState = await loadOrCreateLucyDeviceState();
-  const targetApiKey = params.to?.trim() || account.apiKey;
+  const targetApiKey = normalizeLucyOutboundTarget(params.to) || account.apiKey;
   const targetAccount: ResolvedLucyAccount = {
     ...account,
     apiKey: targetApiKey,
@@ -120,7 +128,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     }),
   },
   messaging: {
-    normalizeTarget: (raw) => raw.trim() || undefined,
+    normalizeTarget: (raw) => normalizeLucyOutboundTarget(raw),
     targetResolver: {
       looksLikeId: (raw) => raw.trim().length > 0,
       hint: "<apiKey>",

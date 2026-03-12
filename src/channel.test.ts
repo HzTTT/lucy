@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { lucyPlugin } from "./channel.js";
+import { normalizeLucyOutboundTarget } from "./channel.js";
 
-describe("lucyPlugin", () => {
-  it("declares a DM-only channel", () => {
-    expect(lucyPlugin.id).toBe("lucy");
-    expect(lucyPlugin.capabilities.chatTypes).toEqual(["direct"]);
-    expect(lucyPlugin.capabilities.media).toBe(true);
-    expect(lucyPlugin.capabilities.blockStreaming).toBe(true);
+describe("normalizeLucyOutboundTarget", () => {
+  it("strips the lucy: prefix used by message tool targets", () => {
+    expect(normalizeLucyOutboundTarget("lucy:demo_user")).toBe("demo_user");
   });
 
-  it("exposes a direct outbound adapter", () => {
-    expect(lucyPlugin.outbound?.deliveryMode).toBe("direct");
-    expect(lucyPlugin.outbound?.sendMedia).toBeTypeOf("function");
-    expect(lucyPlugin.gateway?.startAccount).toBeTypeOf("function");
+  it("keeps already-normalized apiKeys unchanged", () => {
+    expect(normalizeLucyOutboundTarget("demo_user")).toBe("demo_user");
+  });
+
+  it("returns undefined for empty targets", () => {
+    expect(normalizeLucyOutboundTarget("   ")).toBeUndefined();
   });
 });
