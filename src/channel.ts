@@ -22,6 +22,16 @@ export function normalizeLucyOutboundTarget(raw: string | undefined): string | u
   return trimmed.replace(/^lucy:/i, "").trim() || undefined;
 }
 
+export function mergeLucyMediaLocalRoots(
+  runtimeRoots: readonly string[] | undefined,
+  configuredRoots: readonly string[] | undefined,
+): readonly string[] | undefined {
+  const merged = [...(runtimeRoots ?? []), ...(configuredRoots ?? [])]
+    .map((root) => root.trim())
+    .filter((root) => root.length > 0);
+  return merged.length > 0 ? Array.from(new Set(merged)) : undefined;
+}
+
 async function publishLucyOutboundAssistantFinal(params: {
   cfg: OpenClawConfig;
   to: string;
@@ -43,6 +53,10 @@ async function publishLucyOutboundAssistantFinal(params: {
   };
   const trimmedText = params.text?.trim() || undefined;
   const connection = await connectLucyNats(account);
+  const mediaLocalRoots = mergeLucyMediaLocalRoots(
+    params.mediaLocalRoots,
+    account.mediaLocalRoots,
+  );
 
   try {
     const eventId = getProcessSnowflakeGenerator().nextId();
@@ -53,7 +67,7 @@ async function publishLucyOutboundAssistantFinal(params: {
           deviceId: deviceState.deviceId,
           eventId,
           mediaUrl: params.mediaUrl,
-          mediaLocalRoots: params.mediaLocalRoots,
+          mediaLocalRoots,
         })
       : undefined;
 

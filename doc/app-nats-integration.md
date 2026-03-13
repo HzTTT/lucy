@@ -36,6 +36,23 @@ openclaw plugins install @hzttt/lucy
 }
 ```
 
+如果 Gateway 侧还需要通过 Lucy 发送默认 OpenClaw roots 之外的本地图片或音频，可以额外配置：
+
+```json5
+{
+  channels: {
+    lucy: {
+      enabled: true,
+      apiKey: "demo_user",
+      servers: ["nats://127.0.0.1:4222"],
+      mediaLocalRoots: ["/home/lucy/data/usb", "/mnt/photos"],
+    },
+  },
+}
+```
+
+`mediaLocalRoots` 只影响 Gateway 读取本地文件并转成 Lucy 媒体 descriptor 的场景，不影响 App 侧按协议直接上传 JetStream Object Store。
+
 如果 Gateway 连接的 NATS 需要 token 鉴权，配置应改为：
 
 ```json5
@@ -327,6 +344,8 @@ descriptor 定义：
 
 1. OpenClaw reply payload 直接提供 `mediaUrl` / `mediaUrls`
 2. Agent 文本中包含 `MEDIA: <path-or-url>` 指令
+
+如果来源是 Gateway 本地绝对路径，这个路径必须位于 OpenClaw 允许的媒体根目录内。默认 roots 之外的路径需要事先加入 `channels.lucy.mediaLocalRoots`，否则会在上传到 Object Store 之前被安全检查拒绝。
 
 App 侧不应自己解析 `MEDIA:` 文本，而应只处理标准 machine event。
 

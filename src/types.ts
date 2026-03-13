@@ -44,6 +44,7 @@ export const LucyConfigSchema = z.object({
   mediaBucket: z.string().regex(OBJECT_STORE_BUCKET_RE).optional(),
   mediaRetentionHours: z.number().int().positive().optional(),
   mediaMaxMb: z.number().positive().optional(),
+  mediaLocalRoots: z.array(z.string().min(1)).optional(),
 });
 
 export type LucyConfig = z.infer<typeof LucyConfigSchema>;
@@ -143,6 +144,7 @@ export type ResolvedLucyAccount = {
   mediaBucket: string;
   mediaRetentionHours: number;
   mediaMaxBytes: number;
+  mediaLocalRoots?: string[];
 };
 
 export type LucySubjects = {

@@ -7,6 +7,7 @@ import { setLucyRuntime } from "./runtime.js";
 const publishSpy = vi.fn();
 const downloadMediaSpy = vi.fn();
 const uploadMediaSpy = vi.fn();
+const closeConnectionSpy = vi.fn();
 
 vi.mock("./media.js", () => ({
   downloadLucyMediaDescriptor: vi.fn((params) => downloadMediaSpy(params)),
@@ -35,6 +36,13 @@ vi.mock("./send.js", async (importOriginal) => {
     }),
   };
 });
+
+vi.mock("./nats.js", () => ({
+  buildLucySubjects: vi.fn(),
+  connectLucyNats: vi.fn(async () => ({
+    close: closeConnectionSpy,
+  })),
+}));
 
 function createChannelRuntime(options?: {
   finalPayload?: { text?: string; mediaUrl?: string; mediaUrls?: string[] };
@@ -105,6 +113,8 @@ describe("handleLucyInboundMessage", () => {
     publishSpy.mockClear();
     downloadMediaSpy.mockReset();
     uploadMediaSpy.mockReset();
+    closeConnectionSpy.mockReset();
+    closeConnectionSpy.mockResolvedValue(undefined);
     downloadMediaSpy.mockResolvedValue({
       buffer: Buffer.from("image"),
       contentType: "image/png",

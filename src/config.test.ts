@@ -31,6 +31,22 @@ describe("lucy config", () => {
     expect(account.mediaMaxBytes).toBe(20 * 1024 * 1024);
   });
 
+  it("keeps configured mediaLocalRoots for outbound local media sends", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            apiKey: "demo_user",
+            mediaLocalRoots: [" /srv/lucy-media ", "/mnt/attachments"],
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+
+    expect(account.mediaLocalRoots).toEqual(["/srv/lucy-media", "/mnt/attachments"]);
+  });
+
   it("treats invalid apiKey tokens as unconfigured", () => {
     const account = resolveLucyAccount(
       {

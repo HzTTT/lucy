@@ -219,7 +219,25 @@ bun extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <device
 | `mediaBucket`         | 否   | `lucy_media_v2`             | JetStream Object Store bucket，必须满足 `^[-\\w]+$`   |
 | `mediaRetentionHours` | 否   | `168`                       | 媒体对象保留时间，单位小时                                    |
 | `mediaMaxMb`          | 否   | `20`                        | 单个媒体对象最大尺寸，单位 MiB                                |
+| `mediaLocalRoots`     | 否   | 无                           | 额外允许读取的本地媒体目录数组；用于发送 OpenClaw 默认 roots 之外的本地文件 |
 | `name`                | 否   | 无                           | 状态输出用的显示名称                                       |
+
+如果你要通过 Lucy 发送类似 `/home/...`、`/mnt/...`、外接磁盘挂载目录之类的本地图片，而这些路径不在 OpenClaw 默认允许目录内，就必须显式配置 `channels.lucy.mediaLocalRoots`。Lucy 会把这些目录和 OpenClaw 运行时默认的安全 roots 合并，不会覆盖默认 roots。
+
+示例：
+
+```json5
+{
+  channels: {
+    lucy: {
+      enabled: true,
+      apiKey: "demo_user",
+      servers: ["nats://127.0.0.1:4222"],
+      mediaLocalRoots: ["/home/lucy/data/usb", "/mnt/photos"],
+    },
+  },
+}
+```
 
 
 远端 WSS 示例：
@@ -300,7 +318,7 @@ Lucy 将文本/控制事件和媒体字节分开处理。
 - 默认保留时间为 7 天
 - 当前每个 `assistant.final` 最多只包含一个媒体对象
 - 如有多个候选媒体，丢弃计数可能出现在 `metadata.droppedMediaCount`
-- 如果 `mediaUrl` / `mediaUrls` 是本地路径，这个路径必须先落在 OpenClaw 允许的本地媒体根目录内；典型允许根包括 `~/.openclaw/media`、`~/.openclaw/workspace`、`~/.openclaw/agents`、`~/.openclaw/sandboxes` 和 OpenClaw tmp 目录。直接引用 `/home/.../data/...` 这类路径会在真正上传到 Object Store 之前被 OpenClaw 安全检查拒绝
+- 如果 `mediaUrl` / `mediaUrls` 是本地路径，这个路径必须先落在 OpenClaw 允许的本地媒体根目录内；典型允许根包括 `~/.openclaw/media`、`~/.openclaw/workspace`、`~/.openclaw/agents`、`~/.openclaw/sandboxes` 和 OpenClaw tmp 目录。若你需要发送这些默认 roots 之外的路径，例如 `/home/.../data/...` 或挂载盘目录，请把对应父目录显式加入 `channels.lucy.mediaLocalRoots`
 - 如果上游通过 `message` 工具把图片主动推送到 Lucy，工具里常见的目标写法是 `lucy:<apiKey>`；Lucy 会把它归一化到 `<apiKey>` 对应的命名空间再发到 machine subject
 
 详细 schema 与事件语义请看 `[doc/app-nats-integration.md](doc/app-nats-integration.md)`。

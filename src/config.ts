@@ -53,6 +53,7 @@ export function resolveLucyAccount(
   const mediaBucket = raw.mediaBucket?.trim() || DEFAULT_MEDIA_BUCKET;
   const mediaRetentionHours = raw.mediaRetentionHours ?? DEFAULT_MEDIA_RETENTION_HOURS;
   const mediaMaxMb = raw.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
+  const mediaLocalRoots = raw.mediaLocalRoots?.map((entry) => entry.trim()).filter(Boolean);
   const allowFrom =
     raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ?? (apiKey ? [apiKey] : []);
   const configured =
@@ -82,6 +83,7 @@ export function resolveLucyAccount(
     mediaBucket,
     mediaRetentionHours,
     mediaMaxBytes: Math.floor(mediaMaxMb * 1024 * 1024),
+    mediaLocalRoots,
   };
 }
 
