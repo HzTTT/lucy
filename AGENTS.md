@@ -100,6 +100,16 @@ This git root currently has no commit history, so there is no Lucy-specific conv
 
 Never commit real `apiKey`, NATS credentials, or generated `deviceId` values. Use placeholder tokens that still satisfy `^[A-Za-z0-9_-]+$`, because Lucy uses them as NATS subject segments. Keep runtime packages in `dependencies`; keep `openclaw` in `devDependencies` only so plugin installs remain compatible with OpenClaw's loader.
 
+## OpenClaw SDK Compatibility
+
+Treat the host `openclaw` package as the effective plugin SDK version. There is no separate, independently versioned `@openclaw/plugin-sdk` package on npm; `plugin-sdk` is a set of subpath exports from `openclaw` itself.
+
+- For external/community plugins such as Lucy, prefer the root `openclaw/plugin-sdk` entry for generic plugin APIs and helpers. This is the broad compatibility surface OpenClaw keeps for external plugins.
+- Do not depend on `openclaw/plugin-sdk/compat` in Lucy. OpenClaw documents `compat` as a bundled/internal surface, and older host versions may not export it at all.
+- Use `openclaw/plugin-sdk/core` or channel-specific subpaths only when Lucy intentionally requires a minimum OpenClaw version that is known to export them. Pin and document that minimum host version before shipping.
+- Keep `openclaw` in `devDependencies` or `peerDependencies`, never in runtime `dependencies`. Plugin installs resolve the SDK from the host loader at runtime.
+- When making SDK-facing changes, verify Lucy against the oldest and newest OpenClaw host versions you claim to support. Treat export-path changes as compatibility risks even when TypeScript still passes locally.
+
 ## Notes And Pitfalls
 
 - `docker build` must receive `--build-arg OPENCLAW_EXTENSIONS=lucy`; setting only a shell env var is not enough for the Dockerfile path that installs extension deps.
