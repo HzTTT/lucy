@@ -4,6 +4,7 @@ import {
   createDefaultChannelRuntimeState,
   type ChannelPlugin,
 } from "openclaw/plugin-sdk";
+import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { lucyChannelConfigSchema } from "./config-schema.js";
 import { listLucyAccountIds, resolveLucyAccount, unconfiguredLucyReason } from "./config.js";
 import { startLucyGateway } from "./gateway.js";
@@ -11,8 +12,13 @@ import { ensureLucyMediaStore, uploadLucyMediaFromSource } from "./media.js";
 import { buildLucySubjects, connectLucyNats } from "./nats.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { publishLucyMachineEvent } from "./send.js";
-import { loadOrCreateLucyDeviceState } from "./state.js";
-import { DEFAULT_ACCOUNT_ID, type LucyProbe, type ResolvedLucyAccount } from "./types.js";
+import {
+  DEFAULT_ACCOUNT_ID,
+  LUCY_USER_CENTER_BASE_URL,
+  type LucyProbe,
+  type ResolvedLucyAccount,
+} from "./types.js";
+import { buildLucyBindingCheckUrl } from "./user-center.js";
 
 export function normalizeLucyOutboundTarget(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
@@ -41,21 +47,25 @@ async function publishLucyOutboundAssistantFinal(params: {
   accountId?: string | null;
 }) {
   const account = resolveLucyAccount(params.cfg, params.accountId);
-  if (!account.apiKey) {
-    throw new Error("lucy apiKey is not configured");
+  const deviceState = await syncLucyBindingState({
+    account,
+    waitForBinding: false,
+  });
+  const boundAccount = hydrateLucyAccountFromState(account, deviceState);
+  if (!boundAccount.channelUserKey) {
+    throw new Error("lucy channelUserKey is not bound yet");
   }
 
-  const deviceState = await loadOrCreateLucyDeviceState();
-  const targetApiKey = normalizeLucyOutboundTarget(params.to) || account.apiKey;
+  const targetChannelUserKey = normalizeLucyOutboundTarget(params.to) || boundAccount.channelUserKey;
   const targetAccount: ResolvedLucyAccount = {
-    ...account,
-    apiKey: targetApiKey,
+    ...boundAccount,
+    channelUserKey: targetChannelUserKey,
   };
   const trimmedText = params.text?.trim() || undefined;
-  const connection = await connectLucyNats(account);
+  const connection = await connectLucyNats(boundAccount);
   const mediaLocalRoots = mergeLucyMediaLocalRoots(
     params.mediaLocalRoots,
-    account.mediaLocalRoots,
+    boundAccount.mediaLocalRoots,
   );
 
   try {
@@ -64,7 +74,7 @@ async function publishLucyOutboundAssistantFinal(params: {
       ? await uploadLucyMediaFromSource({
           connection,
           account: targetAccount,
-          deviceId: deviceState.deviceId,
+          deviceId: deviceState.channelDeviceId,
           eventId,
           mediaUrl: params.mediaUrl,
           mediaLocalRoots,
@@ -78,7 +88,7 @@ async function publishLucyOutboundAssistantFinal(params: {
     const event = await publishLucyMachineEvent({
       account: targetAccount,
       connection,
-      deviceId: deviceState.deviceId,
+      deviceId: deviceState.channelDeviceId,
       eventId,
       type: "assistant.final",
       text: trimmedText,
@@ -87,7 +97,7 @@ async function publishLucyOutboundAssistantFinal(params: {
 
     return {
       channel: "lucy",
-      to: targetApiKey,
+      to: targetChannelUserKey,
       messageId: event.eventId,
     };
   } finally {
@@ -103,7 +113,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     selectionLabel: "Lucy (NATS DM)",
     docsPath: "/channels/lucy",
     docsLabel: "lucy",
-    blurb: "DM-only chat over NATS subjects scoped by apiKey and deviceId.",
+    blurb: "DM-only chat over NATS subjects scoped by channel_user_key and channel_device_id.",
     order: 95,
   },
   capabilities: {
@@ -124,7 +134,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
       name: account.name,
       enabled: account.enabled,
       configured: account.configured,
-      audience: account.apiKey,
+      audience: account.channelUserKey,
       dmPolicy: account.dmPolicy,
       mediaBucket: account.mediaBucket,
       mediaRetentionHours: account.mediaRetentionHours,
@@ -137,7 +147,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
       allowFrom: account.dmPolicy === "allowlist" ? account.allowFrom : [],
       allowFromPath: "channels.lucy.allowFrom",
       policyPath: "channels.lucy.dmPolicy",
-      approveHint: "Configure channels.lucy.apiKey or channels.lucy.allowFrom",
+      approveHint: "Configure channels.lucy.channelUserKey or channels.lucy.allowFrom",
       normalizeEntry: (raw) => raw.trim(),
     }),
   },
@@ -145,7 +155,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     normalizeTarget: (raw) => normalizeLucyOutboundTarget(raw),
     targetResolver: {
       looksLikeId: (raw) => raw.trim().length > 0,
-      hint: "<apiKey>",
+      hint: "<channelUserKey>",
     },
   },
   outbound: {
@@ -171,30 +181,49 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     defaultRuntime: createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID),
     collectStatusIssues: (accounts) => collectStatusIssuesFromLastError("lucy", accounts),
     probeAccount: async ({ account }) => {
-      if (!account.apiKey) {
-        throw new Error("lucy apiKey is not configured");
+      const deviceState = await syncLucyBindingState({
+        account,
+        waitForBinding: false,
+      });
+      const boundAccount = hydrateLucyAccountFromState(account, deviceState);
+      if (!boundAccount.channelUserKey) {
+        return {
+          ok: true,
+          bindingStatus: deviceState.bindingStatus,
+          connectedUrl: null,
+          clientSubject: null,
+          machineSubject: null,
+          channelDeviceId: deviceState.channelDeviceId,
+          bindingCheckUrl: buildLucyBindingCheckUrl(deviceState.channelDeviceId),
+          userCenterBaseUrl: LUCY_USER_CENTER_BASE_URL,
+          mediaBucket: account.mediaBucket,
+          mediaRetentionHours: account.mediaRetentionHours,
+        };
       }
-      const deviceState = await loadOrCreateLucyDeviceState();
-      const connection = await connectLucyNats(account);
+      const connection = await connectLucyNats(boundAccount);
       try {
         await connection.flush();
         await ensureLucyMediaStore({
           connection,
-          account,
+          account: boundAccount,
         });
         const subjects = buildLucySubjects({
-          subjectPrefix: account.subjectPrefix,
-          apiKey: account.apiKey,
-          deviceId: deviceState.deviceId,
+          subjectPrefix: boundAccount.subjectPrefix,
+          channelUserKey: boundAccount.channelUserKey,
+          channelDeviceId: deviceState.channelDeviceId,
         });
         return {
           ok: true,
+          bindingStatus: deviceState.bindingStatus,
           connectedUrl: connection.getServer(),
           clientSubject: subjects.clientSubject,
           machineSubject: subjects.machineSubject,
-          deviceId: deviceState.deviceId,
-          mediaBucket: account.mediaBucket,
-          mediaRetentionHours: account.mediaRetentionHours,
+          channelDeviceId: deviceState.channelDeviceId,
+          channelUserKey: boundAccount.channelUserKey,
+          bindingCheckUrl: buildLucyBindingCheckUrl(deviceState.channelDeviceId),
+          userCenterBaseUrl: LUCY_USER_CENTER_BASE_URL,
+          mediaBucket: boundAccount.mediaBucket,
+          mediaRetentionHours: boundAccount.mediaRetentionHours,
         };
       } finally {
         await connection.close();
@@ -211,7 +240,7 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
       lastInboundAt: runtime?.lastInboundAt ?? null,
       lastOutboundAt: runtime?.lastOutboundAt ?? null,
       lastError: runtime?.lastError ?? null,
-      audience: account.apiKey,
+      audience: account.channelUserKey,
       dmPolicy: account.dmPolicy,
       allowFrom: account.allowFrom,
       baseUrl: account.servers[0],
@@ -220,9 +249,13 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
       cliPath: (probe as LucyProbe | undefined)?.clientSubject ?? runtime?.cliPath ?? null,
       dbPath: (probe as LucyProbe | undefined)?.machineSubject ?? runtime?.dbPath ?? null,
       application: {
-        deviceId:
-          (probe as LucyProbe | undefined)?.deviceId ??
-          (runtime?.application as { deviceId?: string } | undefined)?.deviceId ??
+        channelDeviceId:
+          (probe as LucyProbe | undefined)?.channelDeviceId ??
+          (runtime?.application as { channelDeviceId?: string } | undefined)?.channelDeviceId ??
+          null,
+        bindingStatus:
+          (probe as LucyProbe | undefined)?.bindingStatus ??
+          (runtime?.application as { bindingStatus?: string } | undefined)?.bindingStatus ??
           null,
       },
       probe,
@@ -231,7 +264,11 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
       configured: snapshot.configured ?? false,
       running: snapshot.running ?? false,
       audience: snapshot.audience ?? null,
-      deviceId: (snapshot.application as { deviceId?: string } | undefined)?.deviceId ?? null,
+      channelDeviceId:
+        (snapshot.application as { channelDeviceId?: string } | undefined)?.channelDeviceId ??
+        null,
+      bindingStatus:
+        (snapshot.application as { bindingStatus?: string } | undefined)?.bindingStatus ?? null,
       clientSubject: snapshot.cliPath ?? null,
       machineSubject: snapshot.dbPath ?? null,
       mediaBucket: (snapshot as { mediaBucket?: string } | undefined)?.mediaBucket ?? null,
@@ -239,15 +276,18 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     }),
     logSelfId: ({ account, includeChannelPrefix }) => {
       const prefix = includeChannelPrefix === false ? "" : "[lucy] ";
-      void loadOrCreateLucyDeviceState()
+      void syncLucyBindingState({
+        account,
+        waitForBinding: false,
+      })
         .then((deviceState) => {
           console.log(
-            `${prefix}deviceId=${deviceState.deviceId} apiKey=${account.apiKey ?? "unset"} mediaBucket=${account.mediaBucket}`,
+            `${prefix}channelDeviceId=${deviceState.channelDeviceId} channelUserKey=${deviceState.channelUserKey ?? "pending"} bindingStatus=${deviceState.bindingStatus} mediaBucket=${account.mediaBucket}`,
           );
         })
         .catch(() => {
           console.log(
-            `${prefix}deviceId=unavailable apiKey=${account.apiKey ?? "unset"} mediaBucket=${account.mediaBucket}`,
+            `${prefix}channelDeviceId=unavailable channelUserKey=${account.channelUserKey ?? "pending"} mediaBucket=${account.mediaBucket}`,
           );
         });
     },

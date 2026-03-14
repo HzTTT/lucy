@@ -36,7 +36,7 @@ describe("print-probe-fields script", () => {
         // JSON5 comments and trailing commas are allowed in OpenClaw config
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
             subjectPrefix: "cephalon.im.npc",
             mediaBucket: "lucy_media_v2",
             mediaRetentionHours: 72,
@@ -49,8 +49,11 @@ describe("print-probe-fields script", () => {
     await fs.writeFile(
       deviceStatePath,
       JSON.stringify({
-        version: 1,
-        deviceId: "2031378112080429056",
+        version: 2,
+        channelDeviceId: "2031378112080429056",
+        bootstrapToken: "cbt_test",
+        bindingStatus: "bound",
+        channelUserKey: "cuk_demo_user",
         createdAtMs: 1773160840000,
       }),
       "utf8",
@@ -65,9 +68,9 @@ describe("print-probe-fields script", () => {
     ]);
 
     expect(JSON.parse(stdout)).toEqual({
-      deviceId: "2031378112080429056",
-      clientSubject: "cephalon.im.npc.demo_user.2031378112080429056.client",
-      machineSubject: "cephalon.im.npc.demo_user.2031378112080429056.machine",
+      channelDeviceId: "2031378112080429056",
+      clientSubject: "cephalon.im.npc.cuk_demo_user.2031378112080429056.client",
+      machineSubject: "cephalon.im.npc.cuk_demo_user.2031378112080429056.machine",
       mediaBucket: "lucy_media_v2",
       mediaRetentionHours: 72,
     });
@@ -84,7 +87,7 @@ describe("print-probe-fields script", () => {
       JSON.stringify({
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
           },
         },
       }),
@@ -93,8 +96,11 @@ describe("print-probe-fields script", () => {
     await fs.writeFile(
       deviceStatePath,
       JSON.stringify({
-        version: 1,
-        deviceId: "2031378112080429056",
+        version: 2,
+        channelDeviceId: "2031378112080429056",
+        bootstrapToken: "cbt_test",
+        bindingStatus: "bound",
+        channelUserKey: "cuk_demo_user",
         createdAtMs: 1773160840000,
       }),
       "utf8",
@@ -109,9 +115,9 @@ describe("print-probe-fields script", () => {
     ]);
 
     expect(JSON.parse(stdout)).toEqual({
-      deviceId: "2031378112080429056",
-      clientSubject: "cephalon.im.npc.demo_user.2031378112080429056.client",
-      machineSubject: "cephalon.im.npc.demo_user.2031378112080429056.machine",
+      channelDeviceId: "2031378112080429056",
+      clientSubject: "cephalon.im.npc.cuk_demo_user.2031378112080429056.client",
+      machineSubject: "cephalon.im.npc.cuk_demo_user.2031378112080429056.machine",
       mediaBucket: "lucy_media_v2",
       mediaRetentionHours: 168,
     });

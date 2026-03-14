@@ -13,18 +13,18 @@ describe("lucy config", () => {
     expect(listLucyAccountIds({} as OpenClawConfig)).toEqual(["default"]);
   });
 
-  it("defaults allowFrom to apiKey", () => {
+  it("defaults allowFrom to channelUserKey", () => {
     const account = resolveLucyAccount(
       {
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
           },
         },
       } as OpenClawConfig,
       "default",
     );
-    expect(account.allowFrom).toEqual(["demo_user"]);
+    expect(account.allowFrom).toEqual(["cuk_demo_user"]);
     expect(account.configured).toBe(true);
     expect(account.mediaBucket).toBe("lucy_media_v2");
     expect(account.mediaRetentionHours).toBe(168);
@@ -36,7 +36,7 @@ describe("lucy config", () => {
       {
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
             mediaLocalRoots: [" /srv/lucy-media ", "/mnt/attachments"],
           },
         },
@@ -47,19 +47,19 @@ describe("lucy config", () => {
     expect(account.mediaLocalRoots).toEqual(["/srv/lucy-media", "/mnt/attachments"]);
   });
 
-  it("treats invalid apiKey tokens as unconfigured", () => {
+  it("treats invalid channelUserKey tokens as unconfigured", () => {
     const account = resolveLucyAccount(
       {
         channels: {
           lucy: {
-            apiKey: "bad.token",
+            channelUserKey: "bad.token",
           },
         },
       } as OpenClawConfig,
       "default",
     );
     expect(account.configured).toBe(false);
-    expect(unconfiguredLucyReason(account)).toContain("apiKey");
+    expect(unconfiguredLucyReason(account)).toContain("channelUserKey");
     expect(isValidSubjectToken("bad.token")).toBe(false);
   });
 
@@ -68,7 +68,7 @@ describe("lucy config", () => {
       {
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
             mediaBucket: "bad.bucket",
           },
         },

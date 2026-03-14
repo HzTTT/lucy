@@ -32,29 +32,25 @@ async function loadRuntime() {
   const config = JSON.parse(configRaw);
   const deviceState = JSON.parse(deviceRaw);
   const lucy = config.channels?.lucy ?? {};
-  const apiKey = lucy.apiKey;
-  const deviceId = deviceState.deviceId;
+  const channelUserKey = lucy.channelUserKey ?? deviceState.channelUserKey ?? lucy.apiKey;
+  const channelDeviceId = deviceState.channelDeviceId ?? deviceState.deviceId;
   const subjectPrefix = lucy.subjectPrefix ?? "cephalon.im.npc";
 
-  if (!apiKey || !deviceId) {
-    throw new Error("lucy apiKey/deviceId missing from runtime config");
+  if (!channelUserKey || !channelDeviceId) {
+    throw new Error("lucy channelUserKey/channelDeviceId missing from runtime config");
   }
 
-  const clientSubject = `${subjectPrefix}.${apiKey}.${deviceId}.client`;
-  const machineSubject = `${subjectPrefix}.${apiKey}.${deviceId}.machine`;
+  const clientSubject = `${subjectPrefix}.${channelUserKey}.${channelDeviceId}.client`;
+  const machineSubject = `${subjectPrefix}.${channelUserKey}.${channelDeviceId}.machine`;
   const connectOptions = {
     servers: lucy.servers ?? ["nats://127.0.0.1:4222"],
   };
-  if (lucy.token) {
-    connectOptions.token = lucy.token;
-  } else {
-    if (lucy.username) connectOptions.user = lucy.username;
-    if (lucy.password) connectOptions.pass = lucy.password;
-  }
+  connectOptions.user = channelUserKey;
+  connectOptions.pass = channelDeviceId;
 
   return {
-    apiKey,
-    deviceId,
+    channelUserKey,
+    channelDeviceId,
     subjectPrefix,
     clientSubject,
     machineSubject,
@@ -172,11 +168,11 @@ async function main() {
       idleMs: 2000,
     },
     {
-      id: "api_key_mismatch_error",
-      label: "Payload apiKey mismatch error",
-      prompt: "This should fail because payload apiKey mismatches the subject namespace.",
+      id: "channel_user_key_mismatch_error",
+      label: "Payload channelUserKey mismatch error",
+      prompt: "This should fail because payload channelUserKey mismatches the subject namespace.",
       payloadOverride: {
-        apiKey: "wrong_namespace",
+        channelUserKey: "wrong_namespace",
       },
       timeoutMs: 8000,
       idleMs: 1000,

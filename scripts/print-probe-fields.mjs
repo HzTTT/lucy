@@ -19,7 +19,7 @@ Usage:
   node scripts/print-probe-fields.mjs [--config <path>] [--state <path>] [--show-paths]
 
 Output fields:
-  deviceId
+  channelDeviceId
   clientSubject
   machineSubject
   mediaBucket
@@ -210,8 +210,14 @@ async function main() {
   const deviceState = await readJsonFile(deviceStatePath, "Lucy device state");
   const lucy = config?.channels?.lucy ?? {};
 
-  const apiKey = requireNonEmptyString(lucy.apiKey, "channels.lucy.apiKey");
-  const deviceId = requireNonEmptyString(deviceState?.deviceId, "lucy.deviceId");
+  const channelUserKey = requireNonEmptyString(
+    lucy.channelUserKey ?? deviceState?.channelUserKey ?? lucy.apiKey,
+    "channels.lucy.channelUserKey",
+  );
+  const channelDeviceId = requireNonEmptyString(
+    deviceState?.channelDeviceId ?? deviceState?.deviceId,
+    "lucy.channelDeviceId",
+  );
   const subjectPrefix =
     typeof lucy.subjectPrefix === "string" && lucy.subjectPrefix.trim()
       ? lucy.subjectPrefix.trim()
@@ -226,9 +232,9 @@ async function main() {
   );
 
   const result = {
-    deviceId,
-    clientSubject: `${subjectPrefix}.${apiKey}.${deviceId}.client`,
-    machineSubject: `${subjectPrefix}.${apiKey}.${deviceId}.machine`,
+    channelDeviceId,
+    clientSubject: `${subjectPrefix}.${channelUserKey}.${channelDeviceId}.client`,
+    machineSubject: `${subjectPrefix}.${channelUserKey}.${channelDeviceId}.machine`,
     mediaBucket,
     mediaRetentionHours,
     ...(args.showPaths

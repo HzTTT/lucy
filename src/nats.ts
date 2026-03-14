@@ -7,31 +7,36 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 
 export function buildLucySubjects(params: {
   subjectPrefix: string;
-  apiKey: string;
-  deviceId: string;
+  channelUserKey: string;
+  channelDeviceId: string;
 }): LucySubjects {
   const prefix = params.subjectPrefix.trim();
   return {
-    clientSubject: `${prefix}.${params.apiKey}.${params.deviceId}.client`,
-    machineSubject: `${prefix}.${params.apiKey}.${params.deviceId}.machine`,
+    clientSubject: `${prefix}.${params.channelUserKey}.${params.channelDeviceId}.client`,
+    machineSubject: `${prefix}.${params.channelUserKey}.${params.channelDeviceId}.machine`,
   };
 }
 
 export function buildLucyNatsConnectionOptions(account: ResolvedLucyAccount): ConnectionOptions {
   const options: ConnectionOptions = {
     servers: account.servers,
-    name: `openclaw-lucy-${account.apiKey ?? "unconfigured"}`,
+    name: `openclaw-lucy-${account.channelUserKey ?? account.channelDeviceId ?? "unbound"}`,
     timeout: DEFAULT_CONNECT_TIMEOUT_MS,
   };
-  if (account.token) {
-    options.token = account.token;
-    return options;
+  if (account.channelUserKey) {
+    options.user = account.channelUserKey;
   }
-  if (account.username) {
+  if (account.channelDeviceId) {
+    options.pass = account.channelDeviceId;
+  }
+  if (!options.user && account.username) {
     options.user = account.username;
   }
-  if (account.password) {
+  if (!options.pass && account.password) {
     options.pass = account.password;
+  }
+  if (!options.user && !options.pass && account.token) {
+    options.token = account.token;
   }
   return options;
 }

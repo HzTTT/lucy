@@ -8,7 +8,8 @@ import type { ResolvedLucyAccount } from "./types.js";
 type MockSession = {
   buffer: string;
   sid?: string;
-  authToken?: string;
+  user?: string;
+  pass?: string;
 };
 
 const serversToClose: WebSocketServer[] = [];
@@ -18,12 +19,12 @@ function createAccount(server: string): ResolvedLucyAccount {
     accountId: "default",
     enabled: true,
     configured: true,
-    apiKey: "demo_user",
+    channelUserKey: "cuk_demo_user",
+    channelDeviceId: "2080563661542787073",
     servers: [server],
     subjectPrefix: "cephalon.im.npc",
-    token: "secret-token",
     dmPolicy: "allowlist",
-    allowFrom: ["demo_user"],
+    allowFrom: ["cuk_demo_user"],
     mediaBucket: "lucy_media_v2",
     mediaRetentionHours: 168,
     mediaMaxBytes: 20 * 1024 * 1024,
@@ -69,8 +70,10 @@ function processClientFrames(
 
     session.buffer = session.buffer.slice(lineBreak + 2);
     if (line.startsWith("CONNECT ")) {
-      session.authToken = JSON.parse(line.slice("CONNECT ".length)).auth_token;
-      if (session.authToken !== "secret-token") {
+      const payload = JSON.parse(line.slice("CONNECT ".length));
+      session.user = payload.user;
+      session.pass = payload.pass;
+      if (session.user !== "cuk_demo_user" || session.pass !== "2080563661542787073") {
         ws.send(Buffer.from(`-ERR 'Authorization Violation'\r\n`, "utf8"));
         ws.close(1008, "Authentication Failure");
         return;
@@ -134,7 +137,8 @@ describe("lucy nats transport", () => {
   it("sets a bounded connect timeout", () => {
     const options = buildLucyNatsConnectionOptions(createAccount("nats://127.0.0.1:4222"));
     expect(options.timeout).toBe(5_000);
-    expect(options.token).toBe("secret-token");
+    expect(options.user).toBe("cuk_demo_user");
+    expect(options.pass).toBe("2080563661542787073");
   });
 
   it("connects to websocket-backed NATS and round-trips publish/subscribe", async () => {

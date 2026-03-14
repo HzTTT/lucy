@@ -24,13 +24,16 @@ type BuildMachineEventParams = {
 };
 
 export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMachineEvent {
+  if (!params.account.channelUserKey) {
+    throw new Error("lucy channelUserKey is not configured");
+  }
   return {
     version: 2,
     eventId: params.eventId ?? getProcessSnowflakeGenerator().nextId(),
     type: params.type,
     timestamp: Date.now(),
-    apiKey: params.account.apiKey ?? "",
-    deviceId: params.deviceId,
+    channelUserKey: params.account.channelUserKey,
+    channelDeviceId: params.deviceId,
     sourceMessageId: params.sourceMessageId,
     runId: params.runId,
     sessionKey: params.sessionKey,
@@ -55,22 +58,22 @@ export async function publishLucyMachineEvent(params: {
   metadata?: Record<string, unknown>;
   media?: LucyMediaDescriptor;
 }): Promise<LucyMachineEvent> {
-  if (!params.account.apiKey) {
-    throw new Error("lucy apiKey is not configured");
+  if (!params.account.channelUserKey) {
+    throw new Error("lucy channelUserKey is not configured");
   }
   const deviceState = params.deviceId
-    ? { deviceId: params.deviceId }
+    ? { channelDeviceId: params.deviceId }
     : await loadOrCreateLucyDeviceState();
   const event = buildLucyMachineEvent({
     ...params,
-    deviceId: deviceState.deviceId,
+    deviceId: deviceState.channelDeviceId,
   });
   const connection = params.connection ?? (await connectLucyNats(params.account));
   try {
     const subjects = buildLucySubjects({
       subjectPrefix: params.account.subjectPrefix,
-      apiKey: params.account.apiKey,
-      deviceId: deviceState.deviceId,
+      channelUserKey: params.account.channelUserKey,
+      channelDeviceId: deviceState.channelDeviceId,
     });
     connection.publish(subjects.machineSubject, encodeLucyMachineEvent(event));
     await connection.flush();

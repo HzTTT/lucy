@@ -7,11 +7,13 @@ export const DEFAULT_NATS_SERVER = "nats://127.0.0.1:4222";
 export const DEFAULT_MEDIA_BUCKET = "lucy_media_v2";
 export const DEFAULT_MEDIA_RETENTION_HOURS = 168;
 export const DEFAULT_MEDIA_MAX_MB = 20;
-export const DEVICE_STATE_VERSION = 1;
+export const DEVICE_STATE_VERSION = 2;
+export const LUCY_USER_CENTER_BASE_URL = "https://test.unicorn.org.cn/cephalon/user-center";
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 export const OBJECT_STORE_BUCKET_RE = /^[-\w]+$/;
 export const OBJECT_STORE_KEY_RE = /^[-/=.\w]+$/;
 export const LUCY_MEDIA_TRANSPORT = "jetstream-object-store";
+export const LucyBindingStatusSchema = z.enum(["pending", "bound"]);
 
 export const LucyMessageIdSchema = z.string().regex(/^\d{19}$/);
 export const LucyMetadataSchema = z.record(z.string(), z.unknown());
@@ -34,6 +36,9 @@ export const LucyConfigSchema = z.object({
   name: z.string().optional(),
   enabled: z.boolean().optional(),
   servers: z.array(z.string().min(1)).optional(),
+  channelUserKey: z.string().min(1).optional(),
+  channelDeviceId: LucyMessageIdSchema.optional(),
+  bootstrapToken: z.string().min(1).optional(),
   apiKey: z.string().min(1).optional(),
   subjectPrefix: z.string().min(1).optional(),
   token: z.string().min(1).optional(),
@@ -48,6 +53,7 @@ export const LucyConfigSchema = z.object({
 });
 
 export type LucyConfig = z.infer<typeof LucyConfigSchema>;
+export type LucyBindingStatus = z.infer<typeof LucyBindingStatusSchema>;
 export type LucyDmPolicy = z.infer<typeof LucyDmPolicySchema>;
 export type LucyMediaKind = z.infer<typeof LucyMediaKindSchema>;
 export type LucyMediaDescriptor = z.infer<typeof LucyMediaDescriptorSchema>;
@@ -58,6 +64,8 @@ export const LucyInboundMessageV1Schema = z.object({
   text: z.string(),
   timestamp: z.number().int().optional(),
   metadata: LucyMetadataSchema.optional(),
+  channelUserKey: z.string().optional(),
+  channelDeviceId: LucyMessageIdSchema.optional(),
   apiKey: z.string().optional(),
   deviceId: LucyMessageIdSchema.optional(),
 });
@@ -70,6 +78,8 @@ export const LucyInboundMessageV2Schema = z
     media: LucyMediaDescriptorSchema.optional(),
     timestamp: z.number().int().optional(),
     metadata: LucyMetadataSchema.optional(),
+    channelUserKey: z.string().optional(),
+    channelDeviceId: LucyMessageIdSchema.optional(),
     apiKey: z.string().optional(),
     deviceId: LucyMessageIdSchema.optional(),
   })
@@ -109,8 +119,8 @@ export const LucyMachineEventSchema = z.object({
   eventId: LucyMessageIdSchema,
   type: LucyMachineEventTypeSchema,
   timestamp: z.number().int(),
-  apiKey: z.string(),
-  deviceId: LucyMessageIdSchema,
+  channelUserKey: z.string(),
+  channelDeviceId: LucyMessageIdSchema,
   sourceMessageId: LucyMessageIdSchema.optional(),
   runId: z.string().optional(),
   sessionKey: z.string().optional(),
@@ -123,8 +133,11 @@ export const LucyMachineEventSchema = z.object({
 export type LucyMachineEvent = z.infer<typeof LucyMachineEventSchema>;
 
 export type LucyDeviceState = {
-  version: 1;
-  deviceId: string;
+  version: 2;
+  channelDeviceId: string;
+  bootstrapToken: string;
+  bindingStatus: LucyBindingStatus;
+  channelUserKey?: string;
   createdAtMs: number;
 };
 
@@ -134,7 +147,9 @@ export type ResolvedLucyAccount = {
   configured: boolean;
   name?: string;
   servers: string[];
-  apiKey?: string;
+  channelUserKey?: string;
+  channelDeviceId?: string;
+  bootstrapToken?: string;
   subjectPrefix: string;
   token?: string;
   username?: string;
@@ -154,10 +169,14 @@ export type LucySubjects = {
 
 export type LucyProbe = {
   ok: true;
+  bindingStatus: LucyBindingStatus;
   connectedUrl: string | null;
-  clientSubject: string;
-  machineSubject: string;
-  deviceId: string;
+  clientSubject: string | null;
+  machineSubject: string | null;
+  channelDeviceId: string;
+  channelUserKey?: string;
+  bindingCheckUrl: string;
+  userCenterBaseUrl: string;
   mediaBucket: string;
   mediaRetentionHours: number;
 };

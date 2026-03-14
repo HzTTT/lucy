@@ -196,7 +196,7 @@ export function buildLucyMediaObjectKey(params: {
 }): string {
   return [
     "outbound",
-    params.account.apiKey ?? "unknown",
+    params.account.channelUserKey ?? "unknown",
     params.deviceId,
     params.eventId,
     normalizeFileName(params.fileName),

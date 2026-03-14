@@ -45,7 +45,9 @@ export function resolveLucyAccount(
   accountId?: string | null,
 ): ResolvedLucyAccount {
   const raw = resolveLucyConfig(cfg);
-  const apiKey = raw.apiKey?.trim() || undefined;
+  const channelUserKey = raw.channelUserKey?.trim() || raw.apiKey?.trim() || undefined;
+  const channelDeviceId = raw.channelDeviceId?.trim() || undefined;
+  const bootstrapToken = raw.bootstrapToken?.trim() || undefined;
   const servers = raw.servers?.map((server) => server.trim()).filter(Boolean) ?? [
     DEFAULT_NATS_SERVER,
   ];
@@ -55,10 +57,11 @@ export function resolveLucyAccount(
   const mediaMaxMb = raw.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaLocalRoots = raw.mediaLocalRoots?.map((entry) => entry.trim()).filter(Boolean);
   const allowFrom =
-    raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ?? (apiKey ? [apiKey] : []);
+    raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ??
+    (channelUserKey ? [channelUserKey] : []);
   const configured =
-    Boolean(apiKey) &&
-    isValidSubjectToken(apiKey) &&
+    (!channelUserKey || isValidSubjectToken(channelUserKey)) &&
+    (!channelDeviceId || /^\d{19}$/.test(channelDeviceId)) &&
     isValidObjectStoreBucket(mediaBucket) &&
     Boolean(subjectPrefix.trim()) &&
     servers.length > 0 &&
@@ -73,7 +76,9 @@ export function resolveLucyAccount(
     configured,
     name: raw.name?.trim() || undefined,
     servers,
-    apiKey,
+    channelUserKey,
+    channelDeviceId,
+    bootstrapToken,
     subjectPrefix,
     token: raw.token?.trim() || undefined,
     username: raw.username?.trim() || undefined,
@@ -88,11 +93,11 @@ export function resolveLucyAccount(
 }
 
 export function unconfiguredLucyReason(account: ResolvedLucyAccount): string {
-  if (!account.apiKey) {
-    return "apiKey is required";
+  if (account.channelUserKey && !isValidSubjectToken(account.channelUserKey)) {
+    return "channelUserKey must match /^[A-Za-z0-9_-]+$/ for NATS subject tokens";
   }
-  if (!isValidSubjectToken(account.apiKey)) {
-    return "apiKey must match /^[A-Za-z0-9_-]+$/ for NATS subject tokens";
+  if (account.channelDeviceId && !/^\d{19}$/.test(account.channelDeviceId)) {
+    return "channelDeviceId must be a 19-digit snowflake";
   }
   if (!account.subjectPrefix.trim()) {
     return "subjectPrefix is required";

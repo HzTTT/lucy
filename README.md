@@ -12,6 +12,7 @@ Lucy 只负责 Channel 传输层，不负责模型提供商、Agent 策略或上
 ## 文档导航
 
 - `[README.md](README.md)`：部署、配置、验证与排障
+- `[doc/auth-binding/integrated-flow.md](doc/auth-binding/integrated-flow.md)`：插件二维码绑定、iOS 扫码绑定、`user-center`、`auth-callout` 的统一流程
 - `[doc/app-nats-integration.md](doc/app-nats-integration.md)`：App / SDK 侧 NATS 接入协议
 - `[doc/raw-event-sequences.md](doc/raw-event-sequences.md)`：原始事件时序样例，仅用于观测，不作为 schema 定义
 
@@ -19,8 +20,8 @@ Lucy 只负责 Channel 传输层，不负责模型提供商、Agent 策略或上
 
 ```text
 App/Client
-  ├─ publish -> {prefix}.{apiKey}.{deviceId}.client
-  ├─ subscribe <- {prefix}.{apiKey}.{deviceId}.machine
+  ├─ publish -> {prefix}.{channelUserKey}.{channelDeviceId}.client
+  ├─ subscribe <- {prefix}.{channelUserKey}.{channelDeviceId}.machine
   └─ upload/download media <-> JetStream Object Store
 
 Lucy Gateway Adapter
@@ -36,9 +37,9 @@ OpenClaw Runtime
 
 必须明确的约束：
 
-- `apiKey` 会直接进入 NATS subject，必须满足 `^[A-Za-z0-9_-]+$`
-- `deviceId` 由 Lucy 持久化生成；重建状态目录后可能变化
-- App 必须使用 `openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` 返回里的同一个 `deviceId`
+- `channelUserKey` 会直接进入 NATS subject，必须满足 `^[A-Za-z0-9_-]+$`
+- `channelDeviceId` 由 Lucy 持久化生成；重建状态目录后可能变化
+- App 必须使用 `openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` 返回里的同一个 `channelDeviceId`
 - 媒体依赖 JetStream Object Store；仅有 Core NATS 不够
 - Lucy 当前每条 `assistant.final` 最多只携带一个媒体对象
 
@@ -64,7 +65,7 @@ openclaw plugins install @hzttt/lucy
   channels: {
     lucy: {
       enabled: true,
-      apiKey: "demo_user",
+      channelUserKey: "demo_user",
       servers: ["nats://127.0.0.1:4222"],
     },
   },
@@ -78,7 +79,7 @@ openclaw plugins install @hzttt/lucy
   channels: {
     lucy: {
       enabled: true,
-      apiKey: "demo_user",
+      channelUserKey: "demo_user",
       servers: ["nats://127.0.0.1:4222"],
       token: "nats-token-placeholder",
     },
@@ -90,7 +91,7 @@ openclaw plugins install @hzttt/lucy
 
 ```bash
 openclaw config set channels.lucy.enabled true --strict-json
-openclaw config set channels.lucy.apiKey demo_user
+openclaw config set channels.lucy.channelUserKey demo_user
 openclaw config set channels.lucy.servers '["nats://127.0.0.1:4222"]' --strict-json
 openclaw config set channels.lucy.token nats-token-placeholder
 ```
@@ -107,12 +108,13 @@ openclaw gateway restart
 openclaw config validate
 openclaw plugins info lucy
 openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json \
-    | jq '.channelAccounts.lucy[] | select(.accountId=="default") | .probe | {deviceId, clientSubject, machineSubject, mediaBucket, mediaRetentionHours}'
+    | jq '.channelAccounts.lucy[] | select(.accountId=="default") | .probe | {channelDeviceId, clientSubject, machineSubject, mediaBucket, mediaRetentionHours}'
+openclaw lucy auth-qrcode
 ```
 
 1. 记录 `gateway call channels.status ... --json` 输出中的以下字段：
 
-- `deviceId`
+- `channelDeviceId`
 - `clientSubject`
 - `machineSubject`
 - `mediaBucket`
@@ -121,9 +123,10 @@ openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}
 补充说明：
 
 - `openclaw plugins install @hzttt/lucy` 会安装 npm 包并创建插件记录；后续如果你手动关闭过插件，仍需检查 `plugins.entries.lucy.enabled`
-- `channels status --probe` 适合人工看健康状态；给 App 取 `deviceId` / subject / media 参数时，使用 `gateway call channels.status ... --json`
+- `channels status --probe` 适合人工看健康状态；给 App 取 `channelDeviceId` / subject / media 参数时，使用 `gateway call channels.status ... --json`
+- `openclaw lucy auth-qrcode` 会在终端输出 Lucy 绑定二维码，iOS App 扫码后即可拿到 `channel_device_id` 并发起绑定
 - App 侧拼 subject、发送消息、下载媒体时，都要与当前 JSON 输出保持一致
-- 如果配置目录或状态目录被重建，`deviceId` 可能变化，不能把它当常量硬编码
+- 如果配置目录或状态目录被重建，`channelDeviceId` 可能变化，不能把它当常量硬编码
 
 ### 在仓库内做本地开发与联调
 

@@ -9,16 +9,17 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
+import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { buildLucySubjects, connectLucyNats } from "./nats.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
-import { loadOrCreateLucyDeviceState } from "./state.js";
 import type {
   LucyInboundMessage,
   LucyInboundMessageV2,
   ResolvedLucyAccount,
 } from "./types.js";
 import { LucyInboundMessageSchema } from "./types.js";
+import { buildLucyBindingCheckUrl } from "./user-center.js";
 
 type LucyGatewayContext = ChannelGatewayContext<ResolvedLucyAccount>;
 type PluginChannelRuntime = PluginRuntime["channel"];
@@ -31,8 +32,8 @@ function normalizeLucyInboundMessage(inbound: LucyInboundMessage): LucyInboundMe
     media: "media" in inbound ? inbound.media : undefined,
     timestamp: inbound.timestamp,
     metadata: inbound.metadata,
-    apiKey: inbound.apiKey,
-    deviceId: inbound.deviceId,
+    channelUserKey: inbound.channelUserKey ?? inbound.apiKey,
+    channelDeviceId: inbound.channelDeviceId ?? inbound.deviceId,
   };
 }
 
@@ -79,7 +80,7 @@ function buildInboundContext(params: {
 }) {
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Lucy",
-    from: params.account.apiKey ?? "unknown",
+    from: params.account.channelUserKey ?? "unknown",
     timestamp: params.inbound.timestamp,
     envelope: params.channelRuntime.reply.resolveEnvelopeFormatOptions(params.cfg),
     body: params.rawBody,
@@ -89,18 +90,18 @@ function buildInboundContext(params: {
     BodyForAgent: params.inbound.text?.trim() || params.rawBody,
     RawBody: params.rawBody,
     CommandBody: params.rawBody,
-    From: `lucy:${params.account.apiKey}`,
-    To: `lucy:${params.account.apiKey}`,
+    From: `lucy:${params.account.channelUserKey}`,
+    To: `lucy:${params.account.channelUserKey}`,
     SessionKey: params.route.sessionKey,
     AccountId: params.route.accountId ?? params.account.accountId,
     ChatType: "direct",
-    ConversationLabel: params.account.apiKey,
-    SenderId: params.account.apiKey,
+    ConversationLabel: params.account.channelUserKey,
+    SenderId: params.account.channelUserKey,
     Provider: "lucy",
     Surface: "lucy",
     MessageSid: params.inbound.messageId,
     OriginatingChannel: "lucy",
-    OriginatingTo: `lucy:${params.account.apiKey}`,
+    OriginatingTo: `lucy:${params.account.channelUserKey}`,
     CommandAuthorized: true,
     DeviceId: params.deviceId,
     ...(params.mediaPayload ?? {}),
@@ -219,8 +220,8 @@ export async function handleLucyInboundMessage(params: {
   deviceId: string;
   connection?: Awaited<ReturnType<typeof connectLucyNats>>;
 }): Promise<void> {
-  if (!params.account.apiKey) {
-    throw new Error("lucy apiKey is not configured");
+  if (!params.account.channelUserKey) {
+    throw new Error("lucy channelUserKey is not configured");
   }
 
   let ownedConnection: Awaited<ReturnType<typeof connectLucyNats>> | undefined;
@@ -253,25 +254,25 @@ export async function handleLucyInboundMessage(params: {
       messageId: parsed.data.messageId ?? getProcessSnowflakeGenerator().nextId(),
     });
 
-    if (inbound.apiKey && inbound.apiKey !== params.account.apiKey) {
+    if (inbound.channelUserKey && inbound.channelUserKey !== params.account.channelUserKey) {
       await publishLucyMachineEvent({
         account: params.account,
         connection: params.connection,
         deviceId: params.deviceId,
         type: "error",
         sourceMessageId: inbound.messageId,
-        text: "payload apiKey does not match subject namespace",
+        text: "payload channelUserKey does not match subject namespace",
       });
       return;
     }
-    if (inbound.deviceId && inbound.deviceId !== params.deviceId) {
+    if (inbound.channelDeviceId && inbound.channelDeviceId !== params.deviceId) {
       await publishLucyMachineEvent({
         account: params.account,
         connection: params.connection,
         deviceId: params.deviceId,
         type: "error",
         sourceMessageId: inbound.messageId,
-        text: "payload deviceId does not match subject namespace",
+        text: "payload channelDeviceId does not match subject namespace",
       });
       return;
     }
@@ -282,7 +283,7 @@ export async function handleLucyInboundMessage(params: {
       accountId: params.account.accountId,
       peer: {
         kind: "direct",
-        id: params.account.apiKey,
+        id: params.account.channelUserKey,
       },
     });
 
@@ -293,7 +294,7 @@ export async function handleLucyInboundMessage(params: {
         deviceId: params.deviceId,
         type: "error",
         sourceMessageId: inbound.messageId,
-        text: "no OpenClaw route matched for lucy apiKey",
+        text: "no OpenClaw route matched for lucy channelUserKey",
       });
       return;
     }
@@ -490,20 +491,25 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   if (!ctx.channelRuntime) {
     throw new Error("channelRuntime not available");
   }
-  const deviceState = await loadOrCreateLucyDeviceState();
-  if (!ctx.account.apiKey) {
-    throw new Error("lucy apiKey is not configured");
-  }
-
-  const subjects = buildLucySubjects({
-    subjectPrefix: ctx.account.subjectPrefix,
-    apiKey: ctx.account.apiKey,
-    deviceId: deviceState.deviceId,
+  const deviceState = await syncLucyBindingState({
+    account: ctx.account,
+    signal: ctx.abortSignal,
+    log: ctx.log,
+    waitForBinding: true,
   });
-  const connection = await connectLucyNats(ctx.account);
+  const boundAccount = hydrateLucyAccountFromState(ctx.account, deviceState);
+  if (!boundAccount.channelUserKey) {
+    throw new Error("lucy channelUserKey is not configured");
+  }
+  const subjects = buildLucySubjects({
+    subjectPrefix: boundAccount.subjectPrefix,
+    channelUserKey: boundAccount.channelUserKey,
+    channelDeviceId: deviceState.channelDeviceId,
+  });
+  const connection = await connectLucyNats(boundAccount);
   await ensureLucyMediaStore({
     connection,
-    account: ctx.account,
+    account: boundAccount,
   });
   const subscription = connection.subscribe(subjects.clientSubject);
   let stopped = false;
@@ -532,13 +538,17 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   updateLucyStatus(ctx, {
     running: true,
     lastStartAt: Date.now(),
-    audience: ctx.account.apiKey,
+    audience: boundAccount.channelUserKey,
     cliPath: subjects.clientSubject,
     dbPath: subjects.machineSubject,
-    application: { deviceId: deviceState.deviceId },
+    application: {
+      channelDeviceId: deviceState.channelDeviceId,
+      bindingStatus: deviceState.bindingStatus,
+      bindingCheckUrl: buildLucyBindingCheckUrl(deviceState.channelDeviceId),
+    },
   });
   ctx.log?.info(
-    `[lucy] listening on ${subjects.clientSubject} and publishing to ${subjects.machineSubject} (media bucket: ${ctx.account.mediaBucket})`,
+    `[lucy] listening on ${subjects.clientSubject} and publishing to ${subjects.machineSubject} (media bucket: ${boundAccount.mediaBucket})`,
   );
 
   try {
@@ -550,11 +560,11 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
         const payload = msg.json<unknown>();
         await handleLucyInboundMessage({
           cfg: ctx.cfg,
-          account: ctx.account,
+          account: boundAccount,
           channelRuntime: ctx.channelRuntime,
           log: ctx.log,
           inbound: payload,
-          deviceId: deviceState.deviceId,
+          deviceId: deviceState.channelDeviceId,
           connection,
         });
         updateLucyStatus(ctx, {
@@ -566,9 +576,9 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
         });
         ctx.log?.error?.(`[lucy] inbound dispatch failed: ${String(err)}`);
         await publishLucyMachineEvent({
-          account: ctx.account,
+          account: boundAccount,
           connection,
-          deviceId: deviceState.deviceId,
+          deviceId: deviceState.channelDeviceId,
           type: "error",
           text: `inbound dispatch failed: ${String(err)}`,
         });

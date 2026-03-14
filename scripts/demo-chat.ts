@@ -12,8 +12,8 @@ import {
 } from "../src/types.js";
 
 type Args = {
-  apiKey?: string;
-  deviceId?: string;
+  channelUserKey?: string;
+  channelDeviceId?: string;
   server: string;
   subjectPrefix: string;
   token?: string;
@@ -51,11 +51,11 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
     const value = argv[i + 1];
-    if (token === "--api-key") {
-      args.apiKey = value;
+    if (token === "--channel-user-key" || token === "--api-key") {
+      args.channelUserKey = value;
       i += 1;
-    } else if (token === "--device-id") {
-      args.deviceId = value;
+    } else if (token === "--channel-device-id" || token === "--device-id") {
+      args.channelDeviceId = value;
       i += 1;
     } else if (token === "--server") {
       args.server = value ?? args.server;
@@ -97,11 +97,15 @@ function requireArg(value: string | undefined, name: string): string {
   return trimmed;
 }
 
-function buildSubjects(params: { subjectPrefix: string; apiKey: string; deviceId: string }) {
+function buildSubjects(params: {
+  subjectPrefix: string;
+  channelUserKey: string;
+  channelDeviceId: string;
+}) {
   const prefix = params.subjectPrefix.trim();
   return {
-    clientSubject: `${prefix}.${params.apiKey}.${params.deviceId}.client`,
-    machineSubject: `${prefix}.${params.apiKey}.${params.deviceId}.machine`,
+    clientSubject: `${prefix}.${params.channelUserKey}.${params.channelDeviceId}.client`,
+    machineSubject: `${prefix}.${params.channelUserKey}.${params.channelDeviceId}.machine`,
   };
 }
 
@@ -199,8 +203,8 @@ async function readObjectStream(result: ObjectResult): Promise<Buffer> {
 async function uploadMedia(
   nc: Awaited<ReturnType<typeof connectLucyNatsWithOptions>>,
   args: Args,
-  apiKey: string,
-  deviceId: string,
+  channelUserKey: string,
+  channelDeviceId: string,
   mediaPath: string,
 ): Promise<MediaDescriptor> {
   const buffer = await fs.readFile(mediaPath);
@@ -208,8 +212,8 @@ async function uploadMedia(
   const { kind, contentType } = inferMediaDescriptor(fileName);
   const bucket = args.mediaBucket.trim();
   const key = buildInboundMediaKey({
-    apiKey,
-    deviceId,
+    apiKey: channelUserKey,
+    deviceId: channelDeviceId,
     fileName,
   });
   const store = await ensureMediaStore(nc, bucket);
@@ -260,18 +264,19 @@ async function maybeDownloadMedia(
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const apiKey = requireArg(args.apiKey, "--api-key");
-  const deviceId = requireArg(args.deviceId, "--device-id");
+  const channelUserKey = requireArg(args.channelUserKey, "--channel-user-key");
+  const channelDeviceId = requireArg(args.channelDeviceId, "--channel-device-id");
   const nc = await connectLucyNatsWithOptions({
     servers: [args.server],
-    name: `lucy-demo-${apiKey}`,
-    token: args.token,
+    name: `lucy-demo-${channelUserKey}`,
+    user: channelUserKey,
+    pass: channelDeviceId,
     timeout: 5_000,
   });
   const subjects = buildSubjects({
     subjectPrefix: args.subjectPrefix,
-    apiKey,
-    deviceId,
+    channelUserKey,
+    channelDeviceId,
   });
   const sub = nc.subscribe(subjects.machineSubject);
   void (async () => {
@@ -303,7 +308,7 @@ async function main() {
       payload.text = text.trim();
     }
     if (mediaPath) {
-      payload.media = await uploadMedia(nc, args, apiKey, deviceId, mediaPath);
+      payload.media = await uploadMedia(nc, args, channelUserKey, channelDeviceId, mediaPath);
     }
     if (!payload.text && !payload.media) {
       throw new Error("Either text or media is required");
@@ -324,9 +329,7 @@ async function main() {
   console.log(`Connected. Publishing to ${subjects.clientSubject}`);
   console.log(`Listening on ${subjects.machineSubject}`);
   console.log(`Media bucket: ${args.mediaBucket}`);
-  if (args.token) {
-    console.log("Using token authentication");
-  }
+  console.log("Using user/pass authentication");
   try {
     while (true) {
       const line = (await rl.question("> ")).trim();

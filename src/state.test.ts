@@ -23,10 +23,13 @@ describe("lucy device state", () => {
   it("persists and reuses a generated device id", async () => {
     const first = await loadOrCreateLucyDeviceState({ forceReload: true });
     const second = await loadOrCreateLucyDeviceState({ forceReload: true });
-    expect(first.deviceId).toMatch(/^\d{19}$/);
-    expect(second.deviceId).toBe(first.deviceId);
+    expect(first.channelDeviceId).toMatch(/^\d{19}$/);
+    expect(first.bootstrapToken).toMatch(/^cbt_/);
+    expect(first.bindingStatus).toBe("pending");
+    expect(second.channelDeviceId).toBe(first.channelDeviceId);
 
     const stored = await readLucyDeviceState({ forceReload: true });
-    expect(stored?.deviceId).toBe(first.deviceId);
+    expect(stored?.channelDeviceId).toBe(first.channelDeviceId);
+    expect(stored?.bootstrapToken).toBe(first.bootstrapToken);
   });
 });

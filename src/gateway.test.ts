@@ -23,17 +23,17 @@ vi.mock("./send.js", async (importOriginal) => {
   return {
     ...actual,
     publishLucyMachineEvent: vi.fn(async (params) => {
-      publishSpy(params);
-      return {
-        version: 2,
-        eventId: params.eventId ?? "2080563661542787072",
-        type: params.type,
-        timestamp: Date.now(),
-        apiKey: params.account.apiKey ?? "",
-        deviceId: params.deviceId ?? "2080563661542787073",
-        media: params.media,
-      };
-    }),
+    publishSpy(params);
+    return {
+      version: 2,
+      eventId: params.eventId ?? "2080563661542787072",
+      type: params.type,
+      timestamp: Date.now(),
+      channelUserKey: params.account.channelUserKey ?? "",
+      channelDeviceId: params.deviceId ?? "2080563661542787073",
+      media: params.media,
+    };
+  }),
   };
 });
 
@@ -97,11 +97,12 @@ function createAccount() {
     accountId: "default",
     enabled: true,
     configured: true,
-    apiKey: "demo_user",
+    channelUserKey: "cuk_demo_user",
+    channelDeviceId: "2080563661542787073",
     servers: ["nats://127.0.0.1:4222"],
     subjectPrefix: "cephalon.im.npc",
     dmPolicy: "allowlist" as const,
-    allowFrom: ["demo_user"],
+    allowFrom: ["cuk_demo_user"],
     mediaBucket: "lucy_media_v2",
     mediaRetentionHours: 168,
     mediaMaxBytes: 20 * 1024 * 1024,
@@ -140,7 +141,7 @@ describe("handleLucyInboundMessage", () => {
       cfg: {
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
           },
         },
       } as OpenClawConfig,
@@ -178,7 +179,7 @@ describe("handleLucyInboundMessage", () => {
       cfg: {
         channels: {
           lucy: {
-            apiKey: "demo_user",
+            channelUserKey: "cuk_demo_user",
           },
         },
       } as OpenClawConfig,
@@ -235,7 +236,7 @@ describe("handleLucyInboundMessage", () => {
     );
   });
 
-  it("emits an error when payload apiKey mismatches the subject namespace", async () => {
+  it("emits an error when payload channelUserKey mismatches the subject namespace", async () => {
     const { runtime } = createChannelRuntime();
     await handleLucyInboundMessage({
       cfg: {} as OpenClawConfig,
@@ -244,7 +245,7 @@ describe("handleLucyInboundMessage", () => {
       inbound: {
         version: 1,
         text: "hello",
-        apiKey: "wrong",
+        channelUserKey: "wrong",
       },
       deviceId: "2080563661542787073",
     });
@@ -252,7 +253,7 @@ describe("handleLucyInboundMessage", () => {
     expect(publishSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "error",
-        text: expect.stringContaining("apiKey"),
+        text: expect.stringContaining("channelUserKey"),
       }),
     );
   });

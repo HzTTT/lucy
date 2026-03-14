@@ -29,7 +29,7 @@ openclaw plugins install @hzttt/lucy
   channels: {
     lucy: {
       enabled: true,
-      apiKey: "demo_user",
+      channelUserKey: "demo_user",
       servers: ["nats://127.0.0.1:4222"],
     },
   },
@@ -43,7 +43,7 @@ openclaw plugins install @hzttt/lucy
   channels: {
     lucy: {
       enabled: true,
-      apiKey: "demo_user",
+      channelUserKey: "demo_user",
       servers: ["nats://127.0.0.1:4222"],
       mediaLocalRoots: ["/home/lucy/data/usb", "/mnt/photos"],
     },
@@ -60,7 +60,7 @@ openclaw plugins install @hzttt/lucy
   channels: {
     lucy: {
       enabled: true,
-      apiKey: "demo_user",
+      channelUserKey: "demo_user",
       servers: ["nats://127.0.0.1:4222"],
       token: "nats-token-placeholder",
     },
@@ -79,7 +79,7 @@ openclaw gateway restart
 ```bash
 openclaw channels status --probe
 openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json \
-    | jq '.channelAccounts.lucy[] | select(.accountId=="default") | .probe | {deviceId, clientSubject, machineSubject, mediaBucket, mediaRetentionHours}'
+    | jq '.channelAccounts.lucy[] | select(.accountId=="default") | .probe | {channelDeviceId, clientSubject, machineSubject, mediaBucket, mediaRetentionHours}'
 ```
 
 接入侧必须记录以下值：
@@ -87,14 +87,14 @@ openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}
 - `servers`
 - 认证信息：`token` 或 `username/password`
 - `subjectPrefix`
-- `apiKey`
-- `deviceId`
+- `channelUserKey`
+- `channelDeviceId`
 - `mediaBucket`
 
 约束：
 
-- `deviceId` 由 Lucy 持久化生成，App 必须使用当前运行实例的值
-- 如果配置目录或状态目录重建，`deviceId` 可能变化
+- `channelDeviceId` 由 Lucy 持久化生成，App 必须使用当前运行实例的值
+- 如果配置目录或状态目录重建，`channelDeviceId` 可能变化
 - npm 包名是 `@hzttt/lucy`，但 OpenClaw 内部的插件 id 和 channel id 都是 `lucy`
 - `channels status --probe` 适合人工查看健康状态；给 App 或脚本取 `deviceId` / subject / media 参数时，使用 `gateway call channels.status ... --json`
 
@@ -113,11 +113,11 @@ Lucy 支持两类 NATS 入口：
 
 ## 3. Subject 约定
 
-Lucy 使用 `subjectPrefix + apiKey + deviceId` 构造一对固定 subject：
+Lucy 使用 `subjectPrefix + channelUserKey + channelDeviceId` 构造一对固定 subject：
 
 ```text
-client  = {subjectPrefix}.{apiKey}.{deviceId}.client
-machine = {subjectPrefix}.{apiKey}.{deviceId}.machine
+client  = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.client
+machine = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.machine
 ```
 
 默认 `subjectPrefix`：
