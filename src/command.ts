@@ -1,7 +1,8 @@
 import qrcode from "qrcode-terminal";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { buildLucyAuthQrUri } from "./auth-qrcode.js";
-import { loadOrCreateLucyDeviceState } from "./state.js";
+import { loadOrCreateLucyDeviceState, resetLucyDeviceState } from "./state.js";
+import { resolveLucyAccount } from "./config.js";
 
 export function buildLucyBindQrUrl(channelDeviceId: string): string {
   return buildLucyAuthQrUri(channelDeviceId);
@@ -27,6 +28,38 @@ export function formatLucyAuthQrReply(params: {
   ].join("\n");
 }
 
+export function formatLucyResetStateReply(params: {
+  previousChannelDeviceId?: string;
+  channelDeviceId: string;
+  qrUrl: string;
+  qrAscii: string;
+  configuredOverrideFields?: string[];
+}): string {
+  const overrideWarning =
+    params.configuredOverrideFields && params.configuredOverrideFields.length > 0
+      ? `Warning: channels.lucy.${params.configuredOverrideFields.join(", channels.lucy.")} is configured and will be merged back on the next Lucy start.`
+      : null;
+
+  return [
+    "Lucy device state reset.",
+    "",
+    `previous_channel_device_id: ${params.previousChannelDeviceId ?? "none"}`,
+    `new_channel_device_id: ${params.channelDeviceId}`,
+    "new_binding_status: pending",
+    "",
+    "The previous Lucy binding was cleared from local plugin state only.",
+    "The old device binding is not removed from user-center by this command.",
+    "If Lucy gateway is running, reload or restart it before using the new device.",
+    ...(overrideWarning ? ["", overrideWarning] : []),
+    "",
+    formatLucyAuthQrReply({
+      channelDeviceId: params.channelDeviceId,
+      qrUrl: params.qrUrl,
+      qrAscii: params.qrAscii,
+    }),
+  ].join("\n");
+}
+
 function renderQrAscii(data: string): Promise<string> {
   return new Promise((resolve) => {
     qrcode.generate(data, { small: true }, (output: string) => {
@@ -42,7 +75,14 @@ function formatLucyCommandHelp(): string {
     "openclaw lucy auth-qrcode",
     "/lucy auth-qrcode",
     "",
+    "openclaw lucy reset-state",
+    "openclaw lucy reset",
+    "/lucy reset-state",
+    "/lucy reset",
+    "",
     "Generate a QR code that contains the current channel_device_id so the iOS app can scan and bind it.",
+    "",
+    "Reset the local Lucy device state, generate a fresh device identity, and print a new bind QR code.",
   ].join("\n");
 }
 
@@ -64,6 +104,53 @@ function printLucyAuthQrToConsole(params: {
   console.log(params.qrAscii.trimEnd());
 }
 
+function printLucyResetStateToConsole(params: {
+  previousChannelDeviceId?: string;
+  channelDeviceId: string;
+  qrUrl: string;
+  qrAscii: string;
+  configuredOverrideFields?: string[];
+}) {
+  console.log(
+    formatLucyResetStateReply({
+      previousChannelDeviceId: params.previousChannelDeviceId,
+      channelDeviceId: params.channelDeviceId,
+      qrUrl: params.qrUrl,
+      qrAscii: params.qrAscii,
+      configuredOverrideFields: params.configuredOverrideFields,
+    }),
+  );
+}
+
+function resolveLucyConfiguredOverrideFields(api: OpenClawPluginApi): string[] {
+  const account = resolveLucyAccount(api.runtime.config.loadConfig());
+  const fields: string[] = [];
+  if (account.channelDeviceId) {
+    fields.push("channelDeviceId");
+  }
+  if (account.bootstrapToken) {
+    fields.push("bootstrapToken");
+  }
+  if (account.channelUserKey) {
+    fields.push("channelUserKey");
+  }
+  return fields;
+}
+
+async function buildLucyAuthQrPayload(channelDeviceId: string): Promise<{
+  channelDeviceId: string;
+  qrUrl: string;
+  qrAscii: string;
+}> {
+  const qrUrl = buildLucyBindQrUrl(channelDeviceId);
+  const qrAscii = await renderQrAscii(qrUrl);
+  return {
+    channelDeviceId,
+    qrUrl,
+    qrAscii,
+  };
+}
+
 export function registerLucyCommand(api: OpenClawPluginApi): void {
   api.registerCli(
     ({ program }) => {
@@ -74,12 +161,22 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
         .description("Print a QR code that contains the current channel_device_id for app binding.")
         .action(async () => {
           const state = await loadOrCreateLucyDeviceState();
-          const qrUrl = buildLucyBindQrUrl(state.channelDeviceId);
-          const qrAscii = await renderQrAscii(qrUrl);
-          printLucyAuthQrToConsole({
-            channelDeviceId: state.channelDeviceId,
-            qrUrl,
-            qrAscii,
+          printLucyAuthQrToConsole(await buildLucyAuthQrPayload(state.channelDeviceId));
+        });
+
+      lucy
+        .command("reset-state")
+        .alias("reset")
+        .description(
+          "Reset local Lucy device state, generate a new channel_device_id/bootstrap_token, and print a fresh bind QR code.",
+        )
+        .action(async () => {
+          const { previousState, state } = await resetLucyDeviceState();
+          const authQr = await buildLucyAuthQrPayload(state.channelDeviceId);
+          printLucyResetStateToConsole({
+            previousChannelDeviceId: previousState?.channelDeviceId,
+            ...authQr,
+            configuredOverrideFields: resolveLucyConfiguredOverrideFields(api),
           });
         });
     },
@@ -92,26 +189,34 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
     acceptsArgs: true,
     handler: async (ctx) => {
       const args = ctx.args?.trim() ?? "";
-      const action = args.split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+      const tokens = args.split(/\s+/).filter(Boolean);
+      const action = tokens[0]?.toLowerCase() ?? "";
 
       if (!action || action === "help") {
         return { text: formatLucyCommandHelp() };
       }
 
-      if (action !== "auth-qrcode") {
-        return { text: formatLucyCommandHelp() };
+      if (action === "auth-qrcode") {
+        const state = await loadOrCreateLucyDeviceState();
+        const authQr = await buildLucyAuthQrPayload(state.channelDeviceId);
+        return {
+          text: formatLucyAuthQrReply(authQr),
+        };
       }
 
-      const state = await loadOrCreateLucyDeviceState();
-      const qrUrl = buildLucyBindQrUrl(state.channelDeviceId);
-      const qrAscii = await renderQrAscii(qrUrl);
-      return {
-        text: formatLucyAuthQrReply({
-          channelDeviceId: state.channelDeviceId,
-          qrUrl,
-          qrAscii,
-        }),
-      };
+      if (action === "reset-state" || action === "reset") {
+        const { previousState, state } = await resetLucyDeviceState();
+        const authQr = await buildLucyAuthQrPayload(state.channelDeviceId);
+        return {
+          text: formatLucyResetStateReply({
+            previousChannelDeviceId: previousState?.channelDeviceId,
+            ...authQr,
+            configuredOverrideFields: resolveLucyConfiguredOverrideFields(api),
+          }),
+        };
+      }
+
+      return { text: formatLucyCommandHelp() };
     },
   });
 }

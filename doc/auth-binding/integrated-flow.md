@@ -126,6 +126,8 @@ iOS App 调用：
 Lucy 插件通过命令输出：
 
 - `openclaw lucy auth-qrcode`
+- 如需丢弃当前本地设备状态并重新生成一套新的 `channel_device_id/bootstrap_token`：
+  - `openclaw lucy reset-state`
 
 开发环境也可以直接运行：
 

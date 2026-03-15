@@ -54,9 +54,13 @@ function generateBootstrapToken(): string {
   return `cbt_${randomBytes(24).toString("base64url")}`;
 }
 
+type LucyDeviceStateOverrides = Partial<
+  Pick<LucyDeviceState, "channelDeviceId" | "bootstrapToken" | "channelUserKey">
+>;
+
 function mergeLucyDeviceState(
   base: LucyDeviceState,
-  overrides?: Partial<Pick<LucyDeviceState, "channelDeviceId" | "bootstrapToken" | "channelUserKey">>,
+  overrides?: LucyDeviceStateOverrides,
 ): LucyDeviceState {
   const nextChannelUserKey = overrides?.channelUserKey?.trim() || base.channelUserKey;
   return {
@@ -66,6 +70,17 @@ function mergeLucyDeviceState(
     channelUserKey: nextChannelUserKey,
     bindingStatus: nextChannelUserKey ? "bound" : "pending",
   };
+}
+
+function createLucyDeviceState(overrides?: LucyDeviceStateOverrides): LucyDeviceState {
+  const initial: LucyDeviceState = {
+    version: DEVICE_STATE_VERSION,
+    channelDeviceId: getProcessSnowflakeGenerator().nextId(),
+    bootstrapToken: generateBootstrapToken(),
+    bindingStatus: "pending",
+    createdAtMs: Date.now(),
+  };
+  return mergeLucyDeviceState(initial, overrides);
 }
 
 export async function readLucyDeviceState(params?: {
@@ -119,7 +134,7 @@ export async function writeLucyDeviceState(
 export async function loadOrCreateLucyDeviceState(params?: {
   env?: NodeJS.ProcessEnv;
   forceReload?: boolean;
-  overrides?: Partial<Pick<LucyDeviceState, "channelDeviceId" | "bootstrapToken" | "channelUserKey">>;
+  overrides?: LucyDeviceStateOverrides;
 }): Promise<LucyDeviceState> {
   const existing = await readLucyDeviceState(params);
   if (existing) {
@@ -130,14 +145,23 @@ export async function loadOrCreateLucyDeviceState(params?: {
     }
     return existing;
   }
-  const initial: LucyDeviceState = {
-    version: DEVICE_STATE_VERSION,
-    channelDeviceId: getProcessSnowflakeGenerator().nextId(),
-    bootstrapToken: generateBootstrapToken(),
-    bindingStatus: "pending",
-    createdAtMs: Date.now(),
-  };
-  const state = mergeLucyDeviceState(initial, params?.overrides);
+  const state = createLucyDeviceState(params?.overrides);
   await writeLucyDeviceState(state, params);
   return state;
+}
+
+export async function resetLucyDeviceState(params?: {
+  env?: NodeJS.ProcessEnv;
+  overrides?: LucyDeviceStateOverrides;
+}): Promise<{ previousState: LucyDeviceState | null; state: LucyDeviceState }> {
+  const previousState = await readLucyDeviceState({
+    env: params?.env,
+    forceReload: true,
+  });
+  const state = createLucyDeviceState(params?.overrides);
+  await writeLucyDeviceState(state, params);
+  return {
+    previousState,
+    state,
+  };
 }

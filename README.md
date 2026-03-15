@@ -136,6 +136,7 @@ openclaw plugins install @hzttt/lucy
 1. `openclaw config validate`
 2. `openclaw channels status --probe`
 3. `openclaw lucy auth-qrcode`
+   - 如需丢弃当前本地设备状态并重新生成绑定身份，运行 `openclaw lucy reset-state`
 4. App 扫码绑定并获取当前用户的 `channel_user_key`
 5. 发一条真实消息，观察是否出现：
    - `inbound.accepted`
