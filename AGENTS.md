@@ -4,6 +4,24 @@
 
 Lucy is a TypeScript ESM OpenClaw channel plugin. `index.ts` registers the plugin. Core code lives in `src/`: `channel.ts` defines adapters, `gateway.ts` handles inbound traffic, `send.ts` and `nats.ts` handle transport, and `config.ts`, `config-schema.ts`, `state.ts`, and `types.ts` cover configuration and persisted device state. Tests are colocated as `src/*.test.ts`. Keep metadata in `package.json` and `openclaw.plugin.json`.
 
+## Architecture Role
+
+Treat this repository as the **OpenClaw-side Lucy channel integration**, not as the source of truth for user identity or binding state.
+
+- Lucy plugin responsibilities:
+  - generate and persist `channel_device_id` / `bootstrap_token`
+  - register the device, poll binding state, and persist the bound `channel_user_key`
+  - connect OpenClaw to NATS and map inbound/outbound Lucy subjects and media transport
+- `user-center` responsibilities:
+  - own device registration, user-device binding, `channel_user_key`, and connection verification truth
+- `outside/npc-im-server/auth-callout` responsibilities:
+  - validate `channel_user_key + channel_device_id` with `user-center`
+  - mint minimal NATS permissions for the validated device pair
+- iOS / external clients responsibilities:
+  - scan or fetch Lucy credentials and talk to the same NATS subjects from the client side
+
+When working on auth or transport flows, use `doc/auth-binding/integrated-flow.md` as the contract. Keep the terminology aligned with that document: `channel_user_key`, `channel_device_id`, and `bootstrap_token`. Treat `outside/` as integration-support code for the broader architecture, while `src/` remains the primary product code for this package.
+
 ## Build, Test, and Development Commands
 
 This package has no standalone build script; OpenClaw loads `index.ts` directly at runtime.
