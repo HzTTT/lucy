@@ -1,332 +1,241 @@
 # Lucy
 
-Lucy 是一个面向 OpenClaw 的 DM-only Channel 插件，负责把外部 App 与 OpenClaw Gateway 通过 NATS 连接起来。
+Lucy 是一个面向 OpenClaw 的 DM-only Channel 插件。它负责把 App/客户端 与 OpenClaw Gateway 通过 NATS 连接起来：
 
-- 文本与控制事件走 `client` / `machine` subjects
-- 图片与音频走 JetStream Object Store，事件中只传 v2 media descriptor
-- 支持原生 NATS/TLS：`nats://`、`tls://`
-- 支持 NATS over WebSocket：`ws://`、`wss://`
+- App/客户端向 `client` subject 发布入站消息
+- Lucy 插件订阅 `client`，把消息转成 OpenClaw inbound context
+- OpenClaw 执行 agent / 模型 / 工具
+- Lucy 插件把 `assistant.*`、`reasoning.*`、`tool.*`、`error` 事件发布到 `machine` subject
+- 图片与音频走 JetStream Object Store，事件里只传 media descriptor
 
-Lucy 只负责 Channel 传输层，不负责模型提供商、Agent 策略或上游鉴权编排。要拿到可用的助手回复，OpenClaw 主配置里仍然必须有可工作的模型 provider。
+Lucy 只负责 Channel 传输层，不负责：
+
+- `user-center` 的账号与绑定真相
+- `auth-callout` 的连接鉴权决策
+- OpenClaw 模型 provider 的凭据和可用性
+
+如果模型 provider 不可用，Lucy 仍然会正常收消息，但不会产出可用回复。
 
 ## 文档导航
 
-- `[README.md](README.md)`：部署、配置、验证与排障
-- `[doc/auth-binding/integrated-flow.md](doc/auth-binding/integrated-flow.md)`：插件二维码绑定、iOS 扫码绑定、`user-center`、`auth-callout` 的统一流程
-- `[doc/app-nats-integration.md](doc/app-nats-integration.md)`：App / SDK 侧 NATS 接入协议
-- `[doc/raw-event-sequences.md](doc/raw-event-sequences.md)`：原始事件时序样例，仅用于观测，不作为 schema 定义
+- [doc/README.md](doc/README.md)：文档索引，区分权威协议文档与历史调查文档
+- [doc/auth-binding/integrated-flow.md](doc/auth-binding/integrated-flow.md)：当前权威绑定流程
+- [doc/app-nats-integration.md](doc/app-nats-integration.md)：App / SDK 侧协议边界
+- [doc/raw-event-sequences.md](doc/raw-event-sequences.md)：当前有效的 raw event 样例与观察结论
+- [LucyIOSDemo/README.md](LucyIOSDemo/README.md)：iOS 演示工程说明
 
-## 架构与边界
+## 当前权威流程
 
-```text
-App/Client
-  ├─ publish -> {prefix}.{channelUserKey}.{channelDeviceId}.client
-  ├─ subscribe <- {prefix}.{channelUserKey}.{channelDeviceId}.machine
-  └─ upload/download media <-> JetStream Object Store
+当前以 `doc/auth-binding/integrated-flow.md` 和代码为准，主流程是：
 
-Lucy Gateway Adapter
-  ├─ 校验 subject 命名空间与 payload
-  ├─ 将入站消息转换为 OpenClaw inbound context
-  └─ 将 OpenClaw 执行过程映射为 machine events
+1. Lucy 插件首次启动时自动生成并持久化：
+   - `channel_device_id`
+   - `bootstrap_token`
+2. 插件调用 `user-center` 注册设备，状态进入 `pending`
+3. iOS App 登录 `user-center`，扫码拿到 `channel_device_id`
+4. App 调 `PUT /v1/channels/lucy/device-bindings/{channel_device_id}` 完成绑定
+5. 插件轮询 `GET /v1/channels/lucy/device-bindings/{channel_device_id}`，拿到绑定后的 `channel_user_key`
+6. 插件用 `username = channel_user_key`、`password = channel_device_id` 连接 NATS
+7. `auth-callout` 从 NATS 握手读取这组凭据，调用 `POST /v1/channels/lucy/connection-verifications`
+8. 通过校验后，`auth-callout` 给该设备对签发最小权限
+9. App 如需直连 NATS，也使用同一组 `channel_user_key + channel_device_id`
 
-OpenClaw Runtime
-  ├─ 路由到 agent
-  ├─ 调用模型 / 工具
-  └─ 产生 assistant / reasoning / tool 生命周期事件
-```
+这意味着生产链路的核心身份不是旧文档里的手填 `demo_user/apiKey`，而是绑定后得到的：
 
-必须明确的约束：
+- `channel_user_key`
+- `channel_device_id`
 
-- `channelUserKey` 会直接进入 NATS subject，必须满足 `^[A-Za-z0-9_-]+$`
-- `channelDeviceId` 由 Lucy 持久化生成；重建状态目录后可能变化
-- App 必须使用 `openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` 返回里的同一个 `channelDeviceId`
-- 媒体依赖 JetStream Object Store；仅有 Core NATS 不够
-- Lucy 当前每条 `assistant.final` 最多只携带一个媒体对象
+## 当前已验证的联通路径
 
-## 安装与部署
+按 2026-03-15 的实际排障结果，当前可工作的链路是：
 
-### 在 Gateway 运行环境中从 npm 安装
+- `user-center`：`https://test.unicorn.org.cn/cephalon/user-center`
+- NATS：`nats://chat.lucy.run:4222`
+- `auth-callout`：在 `116.207.140.203` 上运行，并已按 `channel_user_key + channel_device_id` 做真实校验
+- OpenClaw：在 `lucy@192.168.0.4` 上运行，Lucy 插件已成功绑定并连接 NATS
+- OpenClaw 默认模型：`openai-local/gpt-5.4`
 
-Lucy 发布到 npm 的包名是 `@hzttt/lucy`，但在 OpenClaw 内部的插件 id 与 channel id 都是 `lucy`。
+实际验证过的边界：
 
-1. 安装插件：
+- `auth-callout` 日志可见 `kind=lucy auth ok`
+- `openclaw channels status --probe` 显示 Lucy `running` 且 `works`
+- 直接向 Lucy `client` subject 发消息，可收到：
+  - `inbound.accepted`
+  - `assistant.start`
+  - `assistant.partial`
+  - `assistant.final`
+
+## 安装
+
+Lucy 发布到 npm 的包名是 `@hzttt/lucy`，但 OpenClaw 内部的插件 id 与 channel id 都是 `lucy`。
 
 ```bash
 openclaw plugins install @hzttt/lucy
 ```
 
-1. 如果 Gateway 开启了插件 allowlist，把 `lucy` 加入 `plugins.allow`。
-2. 在 `channels.lucy` 下配置 Channel，而不是写到 `plugins.entries.lucy.config`。
+如果 Gateway 开启了插件 allowlist，把 `lucy` 加入 `plugins.allow`。
 
-最小配置：
+## 推荐配置
 
-```json5
-{
-  channels: {
-    lucy: {
-      enabled: true,
-      channelUserKey: "demo_user",
-      servers: ["nats://127.0.0.1:4222"],
-    },
-  },
-}
-```
+### 生产配置：绑定优先
 
-如果你的 NATS 服务启用了 token 鉴权，把 `token` 一并写入 `channels.lucy`：
+当前推荐的 `channels.lucy` 最小配置是：
 
 ```json5
 {
   channels: {
     lucy: {
       enabled: true,
-      channelUserKey: "demo_user",
-      servers: ["nats://127.0.0.1:4222"],
-      token: "nats-token-placeholder",
-    },
-  },
+      servers: ["nats://chat.lucy.run:4222"]
+    }
+  }
 }
 ```
 
-等价 CLI：
+在这个模式下：
 
-```bash
-openclaw config set channels.lucy.enabled true --strict-json
-openclaw config set channels.lucy.channelUserKey demo_user
-openclaw config set channels.lucy.servers '["nats://127.0.0.1:4222"]' --strict-json
-openclaw config set channels.lucy.token nats-token-placeholder
-```
+- `channelDeviceId` 由 Lucy 自动生成并持久化
+- `bootstrapToken` 由 Lucy 自动生成并持久化
+- `channelUserKey` 由 Lucy 通过 `user-center` 绑定后自动拿到
 
-1. 重启 Gateway：
+不要再把“手填一个固定 `demo_user`”当成默认主线。
 
-```bash
-openclaw gateway restart
-```
+### 开发 / 覆盖配置
 
-1. 验证并探测：
+代码当前仍支持这些可选覆盖项：
 
-```bash
-openclaw config validate
-openclaw plugins info lucy
-openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json \
-    | jq '.channelAccounts.lucy[] | select(.accountId=="default") | .probe | {channelDeviceId, clientSubject, machineSubject, mediaBucket, mediaRetentionHours}'
-openclaw lucy auth-qrcode
-```
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 是否启用 Lucy |
+| `servers` | `["nats://127.0.0.1:4222"]` | NATS 地址数组，支持 `nats://`、`tls://`、`ws://`、`wss://` |
+| `channelUserKey` | 无 | 绑定后得到的 `channel_user_key`；也可手工覆盖 |
+| `channelDeviceId` | 无 | 绑定设备 id；一般不需要手工写 |
+| `bootstrapToken` | 无 | 设备 bootstrap 凭据；一般不需要手工写 |
+| `subjectPrefix` | `cephalon.im.npc` | subject 前缀 |
+| `mediaBucket` | `lucy_media_v2` | JetStream Object Store bucket |
+| `mediaRetentionHours` | `168` | 媒体对象保留小时数 |
+| `mediaMaxMb` | `20` | 单个媒体对象大小上限 |
+| `mediaLocalRoots` | 无 | 额外允许读取的本地媒体目录 |
+| `dmPolicy` | `allowlist` | `allowlist` / `open` / `disabled` |
+| `allowFrom` | `[channelUserKey]` | `allowlist` 模式下允许的 peer 列表 |
+| `name` | 无 | 状态输出里的显示名称 |
 
-1. 记录 `gateway call channels.status ... --json` 输出中的以下字段：
+与当前代码兼容但不推荐继续作为主流程文档的旧字段：
 
-- `channelDeviceId`
-- `clientSubject`
-- `machineSubject`
-- `mediaBucket`
-- `mediaRetentionHours`
+- `apiKey`
+- `token`
+- `username`
+- `password`
 
-补充说明：
-
-- `openclaw plugins install @hzttt/lucy` 会安装 npm 包并创建插件记录；后续如果你手动关闭过插件，仍需检查 `plugins.entries.lucy.enabled`
-- `channels status --probe` 适合人工看健康状态；给 App 取 `channelDeviceId` / subject / media 参数时，使用 `gateway call channels.status ... --json`
-- `openclaw lucy auth-qrcode` 会在终端输出 Lucy 绑定二维码，iOS App 扫码后即可拿到 `channel_device_id` 并发起绑定
-- App 侧拼 subject、发送消息、下载媒体时，都要与当前 JSON 输出保持一致
-- 如果配置目录或状态目录被重建，`channelDeviceId` 可能变化，不能把它当常量硬编码
-
-### 在仓库内做本地开发与联调
-
-以下命令从 OpenClaw 仓库根目录运行。开发联调时建议固定配置目录和工作区目录，避免 `deviceId` 在同一会话里漂移。
-
-1. 构建包含 Lucy 依赖的本地镜像：
-
-```bash
-docker build --build-arg OPENCLAW_EXTENSIONS=lucy -t openclaw:local -f Dockerfile .
-```
-
-1. 启动最小调试栈：
-
-```bash
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d nats openclaw-gateway
-```
-
-1. 启用 Lucy 并写入最小配置：
-
-```bash
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli plugins enable lucy
-
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli config set channels.lucy.enabled true
-
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli config set channels.lucy.apiKey demo_user
-
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli config set channels.lucy.servers '["nats://nats:4222"]' --strict-json
-```
-
-如果当前 NATS 环境要求 token 鉴权，再补一条：
-
-```bash
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli config set channels.lucy.token nats-token-placeholder
-```
-
-1. 重启 Gateway 容器并执行健康检查与稳定 JSON 取数：
-
-```bash
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml restart openclaw-gateway
-
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe
-
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli \
-  gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json
-```
-
-1. 查看 Gateway 日志：
-
-```bash
-env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace \
-  docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml logs openclaw-gateway --tail=200
-```
-
-1. 从仓库根目录运行 demo client：
-
-```bash
-bun extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <deviceId>
-```
-
-常用 demo 参数：
-
-- 一次性文本探测：`--text "hello"`
-- 指定等待窗口：`--wait-ms 45000`
-- 发送本地媒体：`--media /absolute/path/to/file.png`
-- 自动下载返回媒体：`--download-dir /tmp/lucy-downloads`
-- 连接远端 WSS：`--server wss://example.com/nats-ws --token <nats-token>`
-
-## 配置参考
-
-所有配置位于 `channels.lucy`。
-
-
-| 字段                    | 必填  | 默认值                         | 说明                                               |
-| --------------------- | --- | --------------------------- | ------------------------------------------------ |
-| `enabled`             | 否   | `true`                      | 是否启用 Lucy Channel                                |
-| `apiKey`              | 是   | 无                           | NATS 命名空间标识，必须满足 `^[A-Za-z0-9_-]+$`              |
-| `servers`             | 否   | `["nats://127.0.0.1:4222"]` | NATS 地址数组，支持 `nats://`、`tls://`、`ws://`、`wss://` |
-| `subjectPrefix`       | 否   | `cephalon.im.npc`           | subject 前缀                                       |
-| `token`               | 否   | 无                           | NATS token 鉴权；设置后优先于用户名密码                        |
-| `username`            | 否   | 无                           | NATS 用户名                                         |
-| `password`            | 否   | 无                           | NATS 密码                                          |
-| `dmPolicy`            | 否   | `allowlist`                 | 可选 `allowlist`、`open`、`disabled`                 |
-| `allowFrom`           | 否   | `[apiKey]`                  | `dmPolicy = "allowlist"` 时的允许列表                  |
-| `mediaBucket`         | 否   | `lucy_media_v2`             | JetStream Object Store bucket，必须满足 `^[-\\w]+$`   |
-| `mediaRetentionHours` | 否   | `168`                       | 媒体对象保留时间，单位小时                                    |
-| `mediaMaxMb`          | 否   | `20`                        | 单个媒体对象最大尺寸，单位 MiB                                |
-| `mediaLocalRoots`     | 否   | 无                           | 额外允许读取的本地媒体目录数组；用于发送 OpenClaw 默认 roots 之外的本地文件 |
-| `name`                | 否   | 无                           | 状态输出用的显示名称                                       |
-
-如果你要通过 Lucy 发送类似 `/home/...`、`/mnt/...`、外接磁盘挂载目录之类的本地图片，而这些路径不在 OpenClaw 默认允许目录内，就必须显式配置 `channels.lucy.mediaLocalRoots`。Lucy 会把这些目录和 OpenClaw 运行时默认的安全 roots 合并，不会覆盖默认 roots。
-
-示例：
-
-```json5
-{
-  channels: {
-    lucy: {
-      enabled: true,
-      apiKey: "demo_user",
-      servers: ["nats://127.0.0.1:4222"],
-      mediaLocalRoots: ["/home/lucy/data/usb", "/mnt/photos"],
-    },
-  },
-}
-```
-
-
-远端 WSS 示例：
-
-```json5
-{
-  plugins: {
-    entries: {
-      lucy: {
-        enabled: true,
-      },
-    },
-  },
-  channels: {
-    lucy: {
-      enabled: true,
-      apiKey: "demo_user",
-      servers: ["wss://example.com/nats-ws"],
-      token: "nats-token-placeholder",
-      dmPolicy: "open",
-      allowFrom: ["*"],
-    },
-  },
-}
-```
-
-说明：
-
-- 如果服务端只暴露 `wss://.../nats-ws`，不能把 scheme 改成 `nats://` 之后继续假设可用
-- `token`、`username`、`password` 都是 Lucy 直连 NATS 时的认证信息，不是上游模型 provider 的凭据
+这些字段依然被代码兼容，但不属于当前推荐的绑定式 Lucy 流程。
 
 ## 运行验证
 
-最小验证顺序：
+推荐按下面顺序验证，不要把传输层和模型层混在一起：
 
 1. `openclaw config validate`
 2. `openclaw channels status --probe`
-3. `openclaw gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json`
-4. 用 App 或 `scripts/demo-chat.ts` 发送一条消息
-5. 等待 `assistant.final`
+3. `openclaw lucy auth-qrcode`
+4. App 扫码绑定并获取当前用户的 `channel_user_key`
+5. 发一条真实消息，观察是否出现：
+   - `inbound.accepted`
+   - `assistant.start`
+   - `assistant.final`
 
-判断边界时，不要把传输层问题和模型配置问题混在一起：
+如果你需要稳定读取当前运行参数，优先看 `channels status --probe` 和 Lucy 启动日志。`gateway call channels.status --json` 在很多环境也能工作，但不要把它当成唯一真相源。
 
-- 看到了 `inbound.accepted`：NATS subject、Lucy listener、OpenClaw 路由已打通
-- 看到了 `assistant.start` 或 `assistant.partial`：模型执行已经开始
-- 看到了 `assistant.final`，但文本是上游鉴权失败或 HTTP 401：Lucy 正常，问题在 provider
-- 没有 `inbound.accepted`：先查 NATS 连接、subject 拼装、Gateway 是否真的在运行
+### 探针字段
 
-机器读取 Lucy 运行参数时，优先使用 `gateway call channels.status ... --json`。常用路径：
+Lucy 的 probe / status 输出里，最关键的字段是：
 
-- `.channels.lucy.deviceId`：当前持久化实例 id
-- `.channelAccounts.lucy[0].probe.connectedUrl`：当前连接到的 NATS 节点
-- `.channelAccounts.lucy[0].probe.clientSubject`：App 入站 subject
-- `.channelAccounts.lucy[0].probe.machineSubject`：App 订阅的事件 subject
-- `.channelAccounts.lucy[0].probe.mediaBucket`：媒体 bucket
-- `.channelAccounts.lucy[0].probe.mediaRetentionHours`：媒体保留时间
+- `channelDeviceId`
+- `bindingStatus`
+- `clientSubject`
+- `machineSubject`
+- `mediaBucket`
+- `connectedUrl`
+
+## 端到端验证命令
+
+### 1. 验证 OpenClaw 模型层
+
+先在 OpenClaw 主机上证明模型 provider 可用：
+
+```bash
+openclaw agent --agent main --message "Reply with exactly OK." --json
+```
+
+如果这里失败，Lucy 不需要改，先修 OpenClaw 模型配置。
+
+### 2. 验证 Lucy 传输层
+
+仓库里自带一个 NATS demo client，可直接打 `client` / `machine` subjects：
+
+```bash
+node_modules/.bin/tsx extensions/lucy/scripts/demo-chat.ts \
+  --server nats://chat.lucy.run:4222 \
+  --channel-user-key <channel_user_key> \
+  --channel-device-id <channel_device_id> \
+  --text "Reply with exactly LUCY_E2E_OK." \
+  --wait-ms 25000
+```
+
+成功时应至少看到：
+
+- `inbound.accepted`
+- `assistant.start`
+- `assistant.final`
+
+## App / iOS 侧注意事项
+
+Lucy 当前线上 machine event 使用的是：
+
+- `channelUserKey`
+- `channelDeviceId`
+
+iOS / Swift 客户端不能只认：
+
+- `channelDeviceID`
+- `channel_device_id`
+- `deviceId`
+
+否则会在收到线上 event 时直接解码失败，并显示通用错误：
+
+`The data couldn’t be read because it is missing.`
+
+仓库里的 `LucyIOSDemo` 已修正这一点，见：
+
+- `LucyMachineEvent` 兼容 `channelDeviceId`
+- 对应回归测试已补
 
 ## 媒体传输
 
-Lucy 将文本/控制事件和媒体字节分开处理。
+Lucy 将文本/控制事件和媒体字节分离：
 
-入站媒体：
+- 入站：App 先上传 Object Store，再在 `client` 消息里带 descriptor
+- 出站：Lucy 上传 Object Store，再在 `assistant.final.media` 里返回 descriptor
 
-1. App 先把图片或音频上传到 JetStream Object Store
-2. App 在 `client` 消息里携带 descriptor
-3. Lucy 下载对象并注入 OpenClaw inbound context
+关键约束：
 
-出站媒体：
-
-1. Agent 产出 `mediaUrl` / `mediaUrls`，或文本中的 `MEDIA: <path-or-url>` 指令
-2. Lucy 选择第一个可识别的图片或音频源，上传到 Object Store
-3. Lucy 在 `assistant.final.media` 中返回 descriptor
-
-协议级注意事项：
-
-- `media.transport` 固定为 `jetstream-object-store`
+- `transport` 固定为 `jetstream-object-store`
 - 默认 bucket 为 `lucy_media_v2`
-- 默认保留时间为 7 天
-- 当前每个 `assistant.final` 最多只包含一个媒体对象
-- 如有多个候选媒体，丢弃计数可能出现在 `metadata.droppedMediaCount`
-- 如果 `mediaUrl` / `mediaUrls` 是本地路径，这个路径必须先落在 OpenClaw 允许的本地媒体根目录内；典型允许根包括 `~/.openclaw/media`、`~/.openclaw/workspace`、`~/.openclaw/agents`、`~/.openclaw/sandboxes` 和 OpenClaw tmp 目录。若你需要发送这些默认 roots 之外的路径，例如 `/home/.../data/...` 或挂载盘目录，请把对应父目录显式加入 `channels.lucy.mediaLocalRoots`
-- 如果上游通过 `message` 工具把图片主动推送到 Lucy，工具里常见的目标写法是 `lucy:<apiKey>`；Lucy 会把它归一化到 `<apiKey>` 对应的命名空间再发到 machine subject
+- 当前每个 `assistant.final` 最多只携带一个媒体对象
+- 如果上游给的是本地 `mediaUrl`，该路径必须位于 OpenClaw 允许的本地媒体根目录内
 
-详细 schema 与事件语义请看 `[doc/app-nats-integration.md](doc/app-nats-integration.md)`。
+详细协议请看 [doc/app-nats-integration.md](doc/app-nats-integration.md)。
 
-## 开发与调试命令
+## 常见故障边界
+
+| 信号 | 解释 | 首要动作 |
+| --- | --- | --- |
+| 没有 `inbound.accepted` | Lucy listener、subject、NATS 连通性异常 | 先查 `auth-callout`、NATS 连接和 probe 输出 |
+| 有 `inbound.accepted`，没有 `assistant.start` | OpenClaw 路由或 agent 执行没开始 | 查 OpenClaw 日志 |
+| 有 `assistant.start`，但最终报 provider/auth/model 错 | Lucy 传输层没问题 | 查 OpenClaw 模型配置 |
+| `No API key found for provider ...` | OpenClaw 默认模型不可用 | 修模型配置，不要改 Lucy |
+| iOS 端提示 `The data couldn’t be read because it is missing.` | App 侧 machine event decoder 与线上字段不兼容 | 升级到接受 `channelDeviceId` 的客户端 |
+| 媒体发送失败，提示本地路径不安全 | 上游 `mediaUrl` 不在允许目录内 | 把文件复制到 OpenClaw 允许的根目录后再发 |
+
+## 开发命令
 
 以下命令从 OpenClaw 仓库根目录运行：
 
@@ -336,26 +245,8 @@ pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/s
 docker build --build-arg OPENCLAW_EXTENSIONS=lucy -t openclaw:local -f Dockerfile .
 ```
 
-建议遵循边界优先的调试流程：
+如果要验证 iOS demo：
 
-1. 先跑 Lucy 的单测和定向 typecheck
-2. 再启动最小 Docker 栈
-3. 先读 Gateway 日志，再改代码
-4. 每次关键变更后重新执行 `channels status --probe`；需要给 App 取稳定字段时，再执行 `gateway call channels.status ... --json`
-5. 先证明传输层，再看模型 provider
-
-## 常见故障信号
-
-
-| 信号                              | 解释                                 | 首要动作                                                            |
-| ------------------------------- | ---------------------------------- | --------------------------------------------------------------- |
-| `auto-restart attempt N/10`     | Gateway 账户启动函数过早返回或抛错              | 检查 Lucy 生命周期代码和启动日志                                             |
-| `configured, works, stopped`    | 配置通过，但 listener 没有持续运行             | 检查 `gateway.startAccount` 是否阻塞到 `abortSignal`                   |
-| `Cannot find module 'nats'`     | 运行时依赖可见性问题，不是 TypeScript 问题        | 检查容器内 `/app/extensions/lucy/node_modules` 与 `/app/node_modules` |
-| 没有 `inbound.accepted`           | subject、NATS 连通性或 Lucy listener 异常 | 先验证 probe 输出与 App 实际 subject 是否一致                               |
-| 出现 `assistant.final` 但内容是上游鉴权失败 | Lucy 传输层健康                         | 转去检查 provider 配置                                                |
-| `Local media path is not under an allowed directory` | 上游生成了一个不在可信根目录内的本地 `mediaUrl` | 先把文件复制到 `~/.openclaw/media` 或 agent workspace 再发送，不要直接引用任意 `/home/...` 路径 |
-| 同一条入站消息出现重复 accepted/final      | 可能是 Gateway 自动重启导致重复监听             | 排查 listener 生命周期与容器重启                                           |
-
-
-本地 Docker 调试时，如果日志提示运行时找不到 `nats`，不要只盯着镜像构建结果。需要同时确认容器运行时的依赖挂载仍然有效，尤其是 `./extensions/lucy/node_modules:/app/extensions/lucy/node_modules` 这类本地挂载。
+```bash
+xcodebuildmcp swift-package test --package-path ./extensions/lucy/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests.testMachineEventDecodesCamelCaseChannelDeviceId
+```

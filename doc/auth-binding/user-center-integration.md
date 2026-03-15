@@ -74,12 +74,45 @@
 - 依赖用户登录态
 - 返回当前用户绑定的 Lucy 设备列表
 
+实际响应包体：
+
+```json
+{
+  "code": 20000,
+  "msg": "操作成功",
+  "data": {
+    "devices": [
+      {
+        "channel": "lucy",
+        "channel_device_id": "2033138771050475520",
+        "binding_status": "bound",
+        "bound_at": "2026-03-15T19:18:14.970013+08:00"
+      }
+    ]
+  }
+}
+```
+
 ### `GET /v1/channels/lucy/current-user/credential`
 
 说明：
 
 - 依赖用户登录态
 - 只有在用户已经至少成功绑定过一台 Lucy 设备后才有结果
+
+实际响应包体：
+
+```json
+{
+  "code": 20000,
+  "msg": "操作成功",
+  "data": {
+    "channel": "lucy",
+    "channel_user_key": "cuk_xxx",
+    "status": "active"
+  }
+}
+```
 
 ### `POST /v1/channels/lucy/connection-verifications`
 
@@ -122,6 +155,7 @@
 - 绑定后插件 bootstrap 能拿到同一个 `channel_user_key`
 - `connection-verifications` 对正确组合返回 `ok=true`
 - `connection-verifications` 对错误 key 返回 `ok=false`
+- 当前真实登录返回中，访问 token 位于 `data.token`
 
 ## 6. 一个已知细节
 

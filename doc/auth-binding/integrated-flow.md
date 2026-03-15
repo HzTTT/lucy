@@ -299,4 +299,5 @@ sequenceDiagram
 
 - `user-center` 当前业务错误大多仍是 HTTP 200 + `code/msg/data` 包装，客户端不能只看 HTTP 状态码
 - 错误的 `bootstrap_token` 当前返回文案仍偏旧，逻辑上是拒绝成功的，但提示语还不够精确
-- Lucy 历史长文档里还有少量旧的 `apiKey/deviceId` 表述，后续还需要做纯文档清理
+- App 侧 machine event decoder 需要兼容当前线上字段 `channelDeviceId`，不能只兼容旧的 `deviceId`
+- 即使绑定、NATS 握手和 `auth-callout` 都已经打通，OpenClaw 仍然必须配置一个可用的模型 provider；否则链路会停在 `inbound.accepted` / `assistant.start` 之前或期间，并在 OpenClaw 日志里表现为 provider/auth/model 错误
