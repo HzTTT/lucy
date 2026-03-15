@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { syncLucyPairingExport } from "./pairing-export.js";
 import { getLucyRuntime } from "./runtime.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import type { LucyDeviceState } from "./types.js";
@@ -128,6 +129,7 @@ export async function writeLucyDeviceState(
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   await fs.writeFile(filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   await fs.chmod(filePath, 0o600);
+  await syncLucyPairingExport(state, params);
   cachedState = state;
 }
 
@@ -143,6 +145,7 @@ export async function loadOrCreateLucyDeviceState(params?: {
       await writeLucyDeviceState(merged, params);
       return merged;
     }
+    await syncLucyPairingExport(existing, params);
     return existing;
   }
   const state = createLucyDeviceState(params?.overrides);

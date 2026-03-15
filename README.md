@@ -75,6 +75,26 @@ openclaw plugins install @hzttt/lucy
 
 如果 Gateway 开启了插件 allowlist，把 `lucy` 加入 `plugins.allow`。
 
+## 绑定与重置命令
+
+Lucy 当前常用的设备绑定命令有两个：
+
+- `openclaw lucy auth-qrcode`
+- `/lucy auth-qrcode`
+  - 输出当前本地 `channel_device_id` 的绑定二维码
+  - 不会修改已有的本地设备状态
+
+- `openclaw lucy reset-state`
+- `openclaw lucy reset`
+- `/lucy reset-state`
+- `/lucy reset`
+  - 清空 Lucy 本地持久化的设备绑定状态
+  - 重新生成新的 `channel_device_id` 和 `bootstrap_token`
+  - 直接输出一份新的绑定二维码
+  - 不会删除 `user-center` 上旧设备的服务端绑定
+  - 如果 Lucy gateway 正在运行，执行后需要 reload 或重启，运行中的 NATS 连接才会切到新设备身份
+  - 如果 `channels.lucy.channelDeviceId`、`channels.lucy.bootstrapToken` 或 `channels.lucy.channelUserKey` 在配置里被手工写死，下一次启动时这些值仍会覆盖本地 state
+
 ## 推荐配置
 
 ### 生产配置：绑定优先
@@ -97,6 +117,7 @@ openclaw plugins install @hzttt/lucy
 - `channelDeviceId` 由 Lucy 自动生成并持久化
 - `bootstrapToken` 由 Lucy 自动生成并持久化
 - `channelUserKey` 由 Lucy 通过 `user-center` 绑定后自动拿到
+- Lucy 还会在本地 state 目录写出一个脱敏的 `lucy/pairing-info.json`，供 `blue-wifi` 这类本地配网服务把 `channel_device_id` 通过 BLE 暴露给 App
 
 不要再把“手填一个固定 `demo_user`”当成默认主线。
 
@@ -136,7 +157,7 @@ openclaw plugins install @hzttt/lucy
 1. `openclaw config validate`
 2. `openclaw channels status --probe`
 3. `openclaw lucy auth-qrcode`
-   - 如需丢弃当前本地设备状态并重新生成绑定身份，运行 `openclaw lucy reset-state`
+   - 如需丢弃当前本地设备状态并重新生成绑定身份与二维码，运行 `openclaw lucy reset-state`
 4. App 扫码绑定并获取当前用户的 `channel_user_key`
 5. 发一条真实消息，观察是否出现：
    - `inbound.accepted`

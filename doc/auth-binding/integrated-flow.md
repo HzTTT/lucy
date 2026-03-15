@@ -126,12 +126,17 @@ iOS App 调用：
 Lucy 插件通过命令输出：
 
 - `openclaw lucy auth-qrcode`
-- 如需丢弃当前本地设备状态并重新生成一套新的 `channel_device_id/bootstrap_token`：
-  - `openclaw lucy reset-state`
+- `openclaw lucy reset-state`
+  - 清空 Lucy 本地持久化的设备状态
+  - 重新生成一套新的 `channel_device_id/bootstrap_token`
+  - 直接输出新的绑定二维码
+  - 不删除 `user-center` 上旧设备的服务端绑定
+  - 如果 Lucy gateway 已在运行，执行后需要 reload 或 restart 才会切到新设备身份
 
 开发环境也可以直接运行：
 
 - `pnpm --filter @hzttt/lucy auth-qrcode`
+- `reset-state` 当前通过 OpenClaw 的命令入口执行，不单独提供包内脚本
 
 二维码内容建议为：
 
@@ -139,11 +144,34 @@ Lucy 插件通过命令输出：
 lucy://bind?channel_device_id=2031655882831360000
 ```
 
-### 第五步：用户在 App 里扫描并绑定设备
+### 第四点五步：插件可选输出 BLE 配对导出
 
-iOS App 扫码得到：
+为了给本地 BLE 配网服务一个稳定、脱敏的交接面，Lucy 还会在本地 state 目录写出：
+
+- `lucy/pairing-info.json`
+
+当前导出内容只包含：
+
+- `channel`
+- `channel_device_id`
+- `binding_status`
+- `created_at_ms`
+
+不会包含：
+
+- `bootstrap_token`
+- `channel_user_key`
+
+这样 `blue-wifi` 之类的本地服务可以把 `channel_device_id` 通过 BLE 直接交给 App，作为扫码之外的另一种配对入口，但绑定真相仍然在 `user-center`。
+
+### 第五步：用户在 App 里扫码或通过 BLE 读取设备并绑定
+
+iOS App 可以通过两种方式拿到：
 
 - `channel_device_id`
+
+1. 扫码 `lucy://bind?channel_device_id=...`
+2. 连接本地 BLE 服务并读取 Lucy 的脱敏 pairing export
 
 iOS App 调用：
 
