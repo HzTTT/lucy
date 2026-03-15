@@ -1,0 +1,4 @@
+node_modules/
+*.tgz
+outside/npc-im-server
+outside/user-center
