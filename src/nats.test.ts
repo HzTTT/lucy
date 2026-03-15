@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
-import { buildLucyNatsConnectionOptions, connectLucyNats } from "./nats.js";
+import { buildLucyNatsConnectionOptions, connectLucyNats, encodeLucyMachineEvent } from "./nats.js";
+import type { LucyMachineEvent } from "./types.js";
 import type { ResolvedLucyAccount } from "./types.js";
 
 type MockSession = {
@@ -134,6 +135,38 @@ afterEach(async () => {
 });
 
 describe("lucy nats transport", () => {
+  it("encodes machine events with protocol field names from the auth-binding docs", () => {
+    const event: LucyMachineEvent = {
+      version: 2,
+      eventId: "2031409944885334016",
+      type: "assistant.final",
+      timestamp: 1773160847289,
+      channelUserKey: "cuk_demo_user",
+      channelDeviceId: "2031378112080429056",
+      sourceMessageId: "1773160841833000000",
+      runId: "90366a44-cd81-4ff4-a10e-87a931c3e740",
+      sessionKey: "agent:main:main",
+      text: "hello",
+      toolName: "read",
+      metadata: { platform: "ios" },
+    };
+
+    expect(JSON.parse(Buffer.from(encodeLucyMachineEvent(event)).toString("utf8"))).toEqual({
+      version: 2,
+      eventId: "2031409944885334016",
+      type: "assistant.final",
+      timestamp: 1773160847289,
+      channel_user_key: "cuk_demo_user",
+      channel_device_id: "2031378112080429056",
+      source_message_id: "1773160841833000000",
+      run_id: "90366a44-cd81-4ff4-a10e-87a931c3e740",
+      session_key: "agent:main:main",
+      text: "hello",
+      tool_name: "read",
+      metadata: { platform: "ios" },
+    });
+  });
+
   it("sets a bounded connect timeout", () => {
     const options = buildLucyNatsConnectionOptions(createAccount("nats://127.0.0.1:4222"));
     expect(options.timeout).toBe(5_000);

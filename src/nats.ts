@@ -2,7 +2,7 @@ import { connect, JSONCodec, type ConnectionOptions, type NatsConnection } from 
 import { connectLucyWebSocketNats, isLucyWebSocketServer } from "./nats-websocket.js";
 import type { LucyMachineEvent, LucySubjects, ResolvedLucyAccount } from "./types.js";
 
-const jsonCodec = JSONCodec<LucyMachineEvent>();
+const machineEventCodec = JSONCodec<Record<string, unknown>>();
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 
 export function buildLucySubjects(params: {
@@ -56,6 +56,24 @@ export async function connectLucyNats(account: ResolvedLucyAccount): Promise<Nat
   return await connectLucyNatsWithOptions(buildLucyNatsConnectionOptions(account));
 }
 
+function serializeLucyMachineEvent(event: LucyMachineEvent): Record<string, unknown> {
+  return {
+    version: event.version,
+    eventId: event.eventId,
+    type: event.type,
+    timestamp: event.timestamp,
+    channel_user_key: event.channelUserKey,
+    channel_device_id: event.channelDeviceId,
+    ...(event.sourceMessageId ? { source_message_id: event.sourceMessageId } : {}),
+    ...(event.runId ? { run_id: event.runId } : {}),
+    ...(event.sessionKey ? { session_key: event.sessionKey } : {}),
+    ...(event.text ? { text: event.text } : {}),
+    ...(event.toolName ? { tool_name: event.toolName } : {}),
+    ...(event.metadata ? { metadata: event.metadata } : {}),
+    ...(event.media ? { media: event.media } : {}),
+  };
+}
+
 export function encodeLucyMachineEvent(event: LucyMachineEvent): Uint8Array {
-  return jsonCodec.encode(event);
+  return machineEventCodec.encode(serializeLucyMachineEvent(event));
 }
