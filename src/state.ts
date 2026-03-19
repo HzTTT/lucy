@@ -32,7 +32,7 @@ function isLucyDeviceState(value: unknown): value is LucyDeviceState {
     /^\d{19}$/.test(record.channelDeviceId) &&
     typeof record.bootstrapToken === "string" &&
     record.bootstrapToken.length > 0 &&
-    (record.bindingStatus === "pending" || record.bindingStatus === "bound") &&
+    (record.bindingStatus === "pending" || record.bindingStatus === "registered" || record.bindingStatus === "bound") &&
     (record.channelUserKey === undefined || typeof record.channelUserKey === "string") &&
     typeof record.createdAtMs === "number"
   );
@@ -64,12 +64,22 @@ function mergeLucyDeviceState(
   overrides?: LucyDeviceStateOverrides,
 ): LucyDeviceState {
   const nextChannelUserKey = overrides?.channelUserKey?.trim() || base.channelUserKey;
+  // Preserve a more-advanced binding status: registered > pending, bound wins all.
+  const baseStatus = base.bindingStatus;
+  let bindingStatus: LucyDeviceState["bindingStatus"];
+  if (nextChannelUserKey) {
+    bindingStatus = "bound";
+  } else if (baseStatus === "registered") {
+    bindingStatus = "registered";
+  } else {
+    bindingStatus = "pending";
+  }
   return {
     ...base,
     channelDeviceId: overrides?.channelDeviceId?.trim() || base.channelDeviceId,
     bootstrapToken: overrides?.bootstrapToken?.trim() || base.bootstrapToken,
     channelUserKey: nextChannelUserKey,
-    bindingStatus: nextChannelUserKey ? "bound" : "pending",
+    bindingStatus,
   };
 }
 

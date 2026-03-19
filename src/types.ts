@@ -13,7 +13,7 @@ export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 export const OBJECT_STORE_BUCKET_RE = /^[-\w]+$/;
 export const OBJECT_STORE_KEY_RE = /^[-/=.\w]+$/;
 export const LUCY_MEDIA_TRANSPORT = "jetstream-object-store";
-export const LucyBindingStatusSchema = z.enum(["pending", "bound"]);
+export const LucyBindingStatusSchema = z.enum(["pending", "registered", "bound"]);
 
 export const LucyMessageIdSchema = z.string().regex(/^\d{19}$/);
 export const LucyMetadataSchema = z.record(z.string(), z.unknown());

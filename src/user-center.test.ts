@@ -105,6 +105,28 @@ describe("lucy user-center client", () => {
     );
   });
 
+  it("preserves registered status when binding poll still returns pending", () => {
+    expect(
+      mergeLucyBindingIntoState(
+        {
+          version: 2,
+          channelDeviceId: "2080563661542787073",
+          bootstrapToken: "cbt_test",
+          bindingStatus: "registered",
+          createdAtMs: 1773160840000,
+        },
+        {
+          binding_status: "pending",
+        },
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        bindingStatus: "registered",
+        channelUserKey: undefined,
+      }),
+    );
+  });
+
   it("builds the binding check URL from the hardcoded user-center base URL", () => {
     expect(buildLucyBindingCheckUrl("2080563661542787073")).toBe(
       "https://test.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
