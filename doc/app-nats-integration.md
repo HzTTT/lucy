@@ -94,11 +94,20 @@ nats://chat.lucy.run:4222
 
 ## 4. Subject 约定
 
-Lucy 使用一对固定 subject：
+Lucy 使用以下 NATS subjects：
+
+### 消息通道
 
 ```text
 client  = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.client
 machine = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.machine
+```
+
+### Presence（设备在线状态）
+
+```text
+discover = {subjectPrefix}.{channelUserKey}._discover
+ping     = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.ping
 ```
 
 默认 `subjectPrefix`：
@@ -107,17 +116,46 @@ machine = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.machine
 cephalon.im.npc
 ```
 
-示例：
-
-```text
-cephalon.im.npc.cuk_demo_user.2031655882831360000.client
-cephalon.im.npc.cuk_demo_user.2031655882831360000.machine
-```
-
 方向约定：
 
 - App -> Lucy：向 `client` subject 发布入站 JSON
 - Lucy -> App：订阅 `machine` subject 接收生命周期事件
+- Lucy -> App：设备连接 NATS 后，向 `_discover` 发布 `online\n{channelDeviceId}`，每 30s 重复；关闭时发 `offline\n{channelDeviceId}`
+- App -> Lucy：向 `ping` subject 发布任意内容，设备立即回复一次 `online` 到 `_discover`（用于首次快速探测）
+- 异常断线：presence-bridge 通过 `$SYS.ACCOUNT` 检测到设备断开，自动向 `_discover` 发布 `offline`
+
+### Presence 消息格式
+
+`_discover` subject 上的消息为 UTF-8 纯文本，两行：
+
+```text
+online
+2034248517330624512
+```
+
+第一行：`online` 或 `offline`  
+第二行：`channelDeviceId`
+
+### Presence 注册（设备端 → presence-bridge）
+
+设备连接 NATS 后向 `client.status.report` 发布一次注册：
+
+```json
+{
+  "client_id": 42,
+  "apikey": "cuk_xxx",
+  "npc_id": "2034248517330624512"
+}
+```
+
+其中 `client_id` 来自 `connection.info.client_id`。这让 presence-bridge 能在异常断线时通过 `$SYS.ACCOUNT` disconnect 事件找到对应设备并广播 offline。
+
+### App 端建议
+
+1. App 连接 NATS 后订阅 `_discover` subject
+2. 立即向 `ping` subject 发一次消息触发即时 online 响应
+3. 收到 `online` 时标记设备在线，重置 45s 超时计时器
+4. 收到 `offline` 或 45s 无心跳时标记设备离线
 
 ## 5. App -> Lucy：入站消息协议
 

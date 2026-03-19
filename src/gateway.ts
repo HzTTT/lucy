@@ -10,7 +10,7 @@ import {
   uploadLucyMediaFromSource,
 } from "./media.js";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
-import { buildLucySubjects, connectLucyNats } from "./nats.js";
+import { buildLucySubjects, connectLucyNats, buildLucyDiscoverSubject, buildLucyPingSubject } from "./nats.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import type {
@@ -514,11 +514,66 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   const subscription = connection.subscribe(subjects.clientSubject);
   let stopped = false;
 
+  // Presence: build the _discover subject for heartbeat and offline notifications.
+  const discoverSubject = buildLucyDiscoverSubject({
+    subjectPrefix: boundAccount.subjectPrefix,
+    channelUserKey: boundAccount.channelUserKey,
+  });
+  const clientId = connection.info?.client_id;
+
+  // Publish presence registration so presence-bridge can map client_id → device.
+  // This is required for the $SYS disconnect handler to broadcast offline.
+  connection.publish(
+    "client.status.report",
+    JSON.stringify({
+      client_id: clientId,
+      apikey: boundAccount.channelUserKey,
+      npc_id: deviceState.channelDeviceId,
+    }),
+  );
+  // Immediately broadcast online.
+  connection.publish(
+    discoverSubject,
+    `online\n${deviceState.channelDeviceId}`,
+  );
+  await connection.flush();
+
+  // Heartbeat: re-publish online every 30 seconds.
+  const heartbeatInterval = setInterval(() => {
+    if (!stopped) {
+      connection.publish(discoverSubject, `online\n${deviceState.channelDeviceId}`);
+    }
+  }, 30_000);
+
+  // Ping responder: clients can request an immediate presence check instead of
+  // waiting up to 30s for the next periodic heartbeat.
+  const pingSubject = buildLucyPingSubject({
+    subjectPrefix: boundAccount.subjectPrefix,
+    channelUserKey: boundAccount.channelUserKey,
+    channelDeviceId: deviceState.channelDeviceId,
+  });
+  const pingSubscription = connection.subscribe(pingSubject);
+  (async () => {
+    try {
+      for await (const _msg of pingSubscription) {
+        if (stopped) break;
+        connection.publish(discoverSubject, `online\n${deviceState.channelDeviceId}`);
+      }
+    } catch {
+      // subscription closed
+    }
+  })();
+
   const stop = () => {
     if (stopped) {
       return;
     }
     stopped = true;
+    clearInterval(heartbeatInterval);
+    pingSubscription.unsubscribe();
+    // Best-effort offline notification before draining the connection.
+    connection.publish(discoverSubject, `offline\n${deviceState.channelDeviceId}`);
+    void connection.flush().catch(() => {});
     subscription.unsubscribe();
     void connection.drain().catch(async () => {
       await connection.close();

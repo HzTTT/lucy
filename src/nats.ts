@@ -17,6 +17,31 @@ export function buildLucySubjects(params: {
   };
 }
 
+/**
+ * Build the _discover subject used for device presence broadcasts.
+ * Scoped to the user key so all devices of the same user share a single channel.
+ * Format: {subjectPrefix}.{channelUserKey}._discover
+ */
+export function buildLucyDiscoverSubject(params: {
+  subjectPrefix: string;
+  channelUserKey: string;
+}): string {
+  return `${params.subjectPrefix.trim()}.${params.channelUserKey}._discover`;
+}
+
+/**
+ * Build the per-device ping subject.
+ * Clients publish to this subject to trigger an immediate presence response.
+ * Format: {subjectPrefix}.{channelUserKey}.{channelDeviceId}.ping
+ */
+export function buildLucyPingSubject(params: {
+  subjectPrefix: string;
+  channelUserKey: string;
+  channelDeviceId: string;
+}): string {
+  return `${params.subjectPrefix.trim()}.${params.channelUserKey}.${params.channelDeviceId}.ping`;
+}
+
 export function buildLucyNatsConnectionOptions(account: ResolvedLucyAccount): ConnectionOptions {
   const options: ConnectionOptions = {
     servers: account.servers,
