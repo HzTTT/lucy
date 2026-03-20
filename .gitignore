@@ -5,3 +5,5 @@ LucyIOSDemo/
 .agents/*
 .claude/*
 .agent/*
+.DS_Store
+LucyIOSDemo.zip
