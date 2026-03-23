@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk";
 import {
   nanos,
   type NatsConnection,
@@ -9,6 +8,7 @@ import {
   type ObjectStore,
 } from "nats";
 import { getLucyRuntime } from "./runtime.js";
+import { loadLucyOutboundMediaFromUrl } from "./outbound-media.js";
 import type {
   LucyMediaDescriptor,
   LucyMediaKind,
@@ -254,7 +254,7 @@ async function resolveOutboundMediaForUpload(params: {
     });
   }
 
-  const loaded = await loadOutboundMediaFromUrl(params.mediaUrl, {
+  const loaded = await loadLucyOutboundMediaFromUrl(params.mediaUrl, {
     maxBytes: params.maxBytes,
     mediaLocalRoots: params.mediaLocalRoots,
   });

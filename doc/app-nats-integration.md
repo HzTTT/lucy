@@ -157,6 +157,11 @@ online
 3. 收到 `online` 时标记设备在线，重置 45s 超时计时器
 4. 收到 `offline` 或 45s 无心跳时标记设备离线
 
+### TODO
+
+- TODO(2026-03-23): 校正多设备账号下的在线态语义。当前 `_discover` 是按 `channelUserKey` 共享的 presence 频道，同一账号绑定多台 `channelDeviceId` 时，App 在线 UI 需要按 `channelDeviceId` 分设备跟踪，不能只按单一用户态显示。
+- TODO(2026-03-23): 复查 OpenClaw 设备在多设备场景下的 `_discover` 心跳可见性。已观察到同账号下另一台设备会稳定广播 `online`, 但 OpenClaw 设备是否总能被 App 正确识别仍需单独验证与修复。
+
 ## 5. App -> Lucy：入站消息协议
 
 当前推荐使用 `version = 2`。

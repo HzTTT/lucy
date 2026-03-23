@@ -9,6 +9,7 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
+import { startLucyPresenceLoop } from "./presence.js";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { buildLucySubjects, connectLucyNats, buildLucyDiscoverSubject, buildLucyPingSubject } from "./nats.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
@@ -519,61 +520,27 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     subjectPrefix: boundAccount.subjectPrefix,
     channelUserKey: boundAccount.channelUserKey,
   });
-  const clientId = connection.info?.client_id;
-
-  // Publish presence registration so presence-bridge can map client_id → device.
-  // This is required for the $SYS disconnect handler to broadcast offline.
-  connection.publish(
-    "client.status.report",
-    JSON.stringify({
-      client_id: clientId,
-      apikey: boundAccount.channelUserKey,
-      npc_id: deviceState.channelDeviceId,
-    }),
-  );
-  // Immediately broadcast online.
-  connection.publish(
-    discoverSubject,
-    `online\n${deviceState.channelDeviceId}`,
-  );
-  await connection.flush();
-
-  // Heartbeat: re-publish online every 30 seconds.
-  const heartbeatInterval = setInterval(() => {
-    if (!stopped) {
-      connection.publish(discoverSubject, `online\n${deviceState.channelDeviceId}`);
-    }
-  }, 30_000);
-
-  // Ping responder: clients can request an immediate presence check instead of
-  // waiting up to 30s for the next periodic heartbeat.
   const pingSubject = buildLucyPingSubject({
     subjectPrefix: boundAccount.subjectPrefix,
     channelUserKey: boundAccount.channelUserKey,
     channelDeviceId: deviceState.channelDeviceId,
   });
-  const pingSubscription = connection.subscribe(pingSubject);
-  (async () => {
-    try {
-      for await (const _msg of pingSubscription) {
-        if (stopped) break;
-        connection.publish(discoverSubject, `online\n${deviceState.channelDeviceId}`);
-      }
-    } catch {
-      // subscription closed
-    }
-  })();
+  const presenceLoop = startLucyPresenceLoop({
+    connection,
+    discoverSubject,
+    pingSubject,
+    channelUserKey: boundAccount.channelUserKey,
+    channelDeviceId: deviceState.channelDeviceId,
+    log: ctx.log,
+  });
+  await presenceLoop.ready;
 
   const stop = () => {
     if (stopped) {
       return;
     }
     stopped = true;
-    clearInterval(heartbeatInterval);
-    pingSubscription.unsubscribe();
-    // Best-effort offline notification before draining the connection.
-    connection.publish(discoverSubject, `offline\n${deviceState.channelDeviceId}`);
-    void connection.flush().catch(() => {});
+    presenceLoop.stop();
     subscription.unsubscribe();
     void connection.drain().catch(async () => {
       await connection.close();

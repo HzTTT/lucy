@@ -1,15 +1,15 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import {
-  collectStatusIssuesFromLastError,
-  createDefaultChannelRuntimeState,
-  type ChannelPlugin,
-} from "openclaw/plugin-sdk";
+import type { ChannelPlugin } from "openclaw/plugin-sdk";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { lucyChannelConfigSchema } from "./config-schema.js";
 import { listLucyAccountIds, resolveLucyAccount, unconfiguredLucyReason } from "./config.js";
 import { startLucyGateway } from "./gateway.js";
 import { ensureLucyMediaStore, uploadLucyMediaFromSource } from "./media.js";
 import { buildLucySubjects, connectLucyNats } from "./nats.js";
+import {
+  collectStatusIssuesFromLastError,
+  createDefaultChannelRuntimeState,
+} from "./plugin-sdk-compat.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { publishLucyMachineEvent } from "./send.js";
 import {
