@@ -38,7 +38,7 @@ describe("lucy user-center client", () => {
       binding_status: "pending",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://test.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/devices/registrations",
+      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/devices/registrations",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -73,7 +73,7 @@ describe("lucy user-center client", () => {
 
     expect(result.channel_user_key).toBe("cuk_demo_user");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://test.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
+      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
       expect.objectContaining({
         headers: expect.objectContaining({
           "X-Bootstrap-Token": "cbt_test",
@@ -129,7 +129,7 @@ describe("lucy user-center client", () => {
 
   it("builds the binding check URL from the hardcoded user-center base URL", () => {
     expect(buildLucyBindingCheckUrl("2080563661542787073")).toBe(
-      "https://test.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
+      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
     );
   });
 });

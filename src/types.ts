@@ -8,7 +8,7 @@ export const DEFAULT_MEDIA_BUCKET = "lucy_media_v2";
 export const DEFAULT_MEDIA_RETENTION_HOURS = 168;
 export const DEFAULT_MEDIA_MAX_MB = 20;
 export const DEVICE_STATE_VERSION = 2;
-export const LUCY_USER_CENTER_BASE_URL = "https://test.unicorn.org.cn/cephalon/user-center";
+export const LUCY_USER_CENTER_BASE_URL = "https://prod.unicorn.org.cn/cephalon/user-center";
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 export const OBJECT_STORE_BUCKET_RE = /^[-\w]+$/;
 export const OBJECT_STORE_KEY_RE = /^[-/=.\w]+$/;

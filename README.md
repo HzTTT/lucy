@@ -49,7 +49,7 @@ Lucy 只负责 Channel 传输层，不负责：
 
 按 2026-03-15 的实际排障结果，当前可工作的链路是：
 
-- `user-center`：`https://test.unicorn.org.cn/cephalon/user-center`
+- `user-center`：`https://prod.unicorn.org.cn/cephalon/user-center`
 - NATS：`nats://chat.lucy.run:4222`
 - `auth-callout`：在 `116.207.140.203` 上运行，并已按 `channel_user_key + channel_device_id` 做真实校验
 - OpenClaw：在 `lucy@192.168.0.4` 上运行，Lucy 插件已成功绑定并连接 NATS
