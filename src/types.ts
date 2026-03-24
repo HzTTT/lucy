@@ -110,6 +110,8 @@ export const LucyMachineEventTypeSchema = z.enum([
   "tool.start",
   "tool.end",
   "error",
+  "approval.pending",
+  "approval.resolved",
 ]);
 
 export type LucyMachineEventType = z.infer<typeof LucyMachineEventTypeSchema>;
@@ -128,6 +130,15 @@ export const LucyMachineEventSchema = z.object({
   toolName: z.string().optional(),
   metadata: LucyMetadataSchema.optional(),
   media: LucyMediaDescriptorSchema.optional(),
+  approvalId: z.string().optional(),
+  approvalSlug: z.string().optional(),
+  approvalCommand: z.string().optional(),
+  approvalCwd: z.string().optional(),
+  approvalHost: z.string().optional(),
+  approvalExpiresAtMs: z.number().optional(),
+  approvalAllowedDecisions: z.array(z.string()).optional(),
+  approvalDecision: z.string().optional(),
+  approvalResolvedBy: z.string().optional(),
 });
 
 export type LucyMachineEvent = z.infer<typeof LucyMachineEventSchema>;

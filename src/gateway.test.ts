@@ -3,6 +3,7 @@ import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleLucyInboundMessage } from "./gateway.js";
 import { setLucyRuntime } from "./runtime.js";
+import { LucyMachineEventSchema, LucyMachineEventTypeSchema } from "./types.js";
 
 const publishSpy = vi.fn();
 const downloadMediaSpy = vi.fn();
@@ -256,5 +257,57 @@ describe("handleLucyInboundMessage", () => {
         text: expect.stringContaining("channelUserKey"),
       }),
     );
+  });
+});
+
+describe("LucyMachineEventSchema approval fields", () => {
+  it("accepts approval.pending event type", () => {
+    expect(LucyMachineEventTypeSchema.options).toContain("approval.pending");
+    expect(LucyMachineEventTypeSchema.options).toContain("approval.resolved");
+  });
+
+  it("parses approval.pending event with all approval fields", () => {
+    const raw = {
+      version: 2,
+      eventId: "1234567890123456789",
+      type: "approval.pending",
+      timestamp: 1711267200000,
+      channelUserKey: "cuk_demo",
+      channelDeviceId: "1234567890123456789",
+      approvalId: "apv_abc123def456",
+      approvalSlug: "apv_abc1",
+      approvalCommand: "rm -rf /tmp/build",
+      approvalCwd: "/home/user",
+      approvalHost: "gateway",
+      approvalExpiresAtMs: 1711267260000,
+      approvalAllowedDecisions: ["allow-once", "allow-always", "deny"],
+    };
+    const result = LucyMachineEventSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.approvalId).toBe("apv_abc123def456");
+      expect(result.data.approvalExpiresAtMs).toBe(1711267260000);
+      expect(result.data.approvalAllowedDecisions).toEqual(["allow-once", "allow-always", "deny"]);
+    }
+  });
+
+  it("parses approval.resolved event with decision fields", () => {
+    const raw = {
+      version: 2,
+      eventId: "1234567890123456790",
+      type: "approval.resolved",
+      timestamp: 1711267210000,
+      channelUserKey: "cuk_demo",
+      channelDeviceId: "1234567890123456789",
+      approvalId: "apv_abc123def456",
+      approvalDecision: "allow-once",
+      approvalResolvedBy: "cuk_demo",
+    };
+    const result = LucyMachineEventSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.approvalDecision).toBe("allow-once");
+      expect(result.data.approvalResolvedBy).toBe("cuk_demo");
+    }
   });
 });
