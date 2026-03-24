@@ -1,31 +1,51 @@
+import { createRequire } from "node:module";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { NatsConnection } from "nats";
+import { resolveExecApprovalCommandDisplay } from "./exec-approval-helpers.js";
 import { publishLucyMachineEvent } from "./send.js";
 import type { ResolvedLucyAccount } from "./types.js";
 
-// Lazy-imported at runtime to avoid static-import / dynamic-import mixing.
-// Two separate lazy wrappers because the two modules must not be mixed.
-type GatewayRuntime = typeof import("openclaw/plugin-sdk/gateway-runtime");
-type InfraRuntime = typeof import("openclaw/plugin-sdk/infra-runtime");
-
-let _gatewayRuntime: GatewayRuntime | undefined;
-async function getGatewayRuntime(): Promise<GatewayRuntime> {
-  if (!_gatewayRuntime) {
-    _gatewayRuntime = await import("openclaw/plugin-sdk/gateway-runtime");
-  }
-  return _gatewayRuntime;
-}
-
-let _infraRuntime: InfraRuntime | undefined;
-async function getInfraRuntime(): Promise<InfraRuntime> {
-  if (!_infraRuntime) {
-    _infraRuntime = await import("openclaw/plugin-sdk/infra-runtime");
-  }
-  return _infraRuntime;
-}
-
 type GatewayClient = { start(): void; stop(): void };
 type EventFrame = { event: string; payload: unknown };
+type GatewayRuntimeModule = {
+  createOperatorApprovalsGatewayClient: (params: {
+    config: OpenClawConfig;
+    gatewayUrl?: string;
+    clientDisplayName: string;
+    onEvent: (evt: EventFrame) => void;
+    onConnectError?: (err: unknown) => void;
+  }) => Promise<GatewayClient>;
+};
+
+let _gatewayRuntime: GatewayRuntimeModule | undefined;
+
+function getGatewayRuntime(): GatewayRuntimeModule {
+  if (_gatewayRuntime) {
+    return _gatewayRuntime;
+  }
+
+  const candidates = [
+    process.argv[1],
+    `${process.cwd()}/index.js`,
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const errors: string[] = [];
+
+  for (const candidate of candidates) {
+    try {
+      const hostRequire = createRequire(candidate);
+      _gatewayRuntime = hostRequire("openclaw/plugin-sdk/gateway-runtime") as GatewayRuntimeModule;
+      return _gatewayRuntime;
+    } catch (err) {
+      errors.push(`${candidate}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  throw new Error(
+    `unable to resolve host openclaw gateway runtime (${errors.join(" | ") || "no candidates"})`,
+  );
+}
 
 export class LucyExecApprovalHandler {
   private gatewayClient: GatewayClient | null = null;
@@ -41,7 +61,7 @@ export class LucyExecApprovalHandler {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    const { createOperatorApprovalsGatewayClient } = await getGatewayRuntime();
+    const { createOperatorApprovalsGatewayClient } = getGatewayRuntime();
     const client = await createOperatorApprovalsGatewayClient({
       config: this.cfg,
       clientDisplayName: `Lucy Exec Approvals (${this.account.accountId})`,
@@ -87,7 +107,6 @@ export class LucyExecApprovalHandler {
   }
 
   private async handleRequested(request: ExecApprovalRequest): Promise<void> {
-    const { resolveExecApprovalCommandDisplay } = await getInfraRuntime();
     const commandDisplay = resolveExecApprovalCommandDisplay(request.request);
     await publishLucyMachineEvent({
       account: this.account,
@@ -119,8 +138,7 @@ export class LucyExecApprovalHandler {
   }
 }
 
-// Minimal local types — the real types live in openclaw/plugin-sdk/infra-runtime.
-// Using structural typing avoids a hard import dependency from this file.
+// Minimal local types for external-plugin runtime safety.
 type ExecApprovalRequest = {
   id: string;
   expiresAtMs: number;

@@ -9,7 +9,10 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
-import { LucyExecApprovalHandler } from "./exec-approvals-handler.js";
+// Import handler with lazy loading for backward compatibility
+// (older openclaw versions may not have gateway-runtime / infra-runtime)
+let _approvalHandler: any = null;
+let _loadAttempted = false;
 import { startLucyPresenceLoop } from "./presence.js";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { buildLucySubjects, connectLucyNats, buildLucyDiscoverSubject, buildLucyPingSubject } from "./nats.js";
@@ -536,20 +539,32 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   });
   await presenceLoop.ready;
 
-  const approvalHandler = new LucyExecApprovalHandler(
-    ctx.cfg,
-    boundAccount,
-    deviceState.channelDeviceId,
-    connection,
-  );
-  await approvalHandler.start();
+  // Try to load and start approval handler (backward compatible with older openclaw)
+  if (!_loadAttempted) {
+    _loadAttempted = true;
+    try {
+      const { LucyExecApprovalHandler } = await import("./exec-approvals-handler.js");
+      _approvalHandler = new LucyExecApprovalHandler(
+        ctx.cfg,
+        boundAccount,
+        deviceState.channelDeviceId,
+        connection,
+      );
+      await _approvalHandler.start();
+    } catch (err) {
+      ctx.log?.info?.(
+        `[lucy] exec approvals not available (requires newer openclaw): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      _approvalHandler = null;
+    }
+  }
 
   const stop = () => {
     if (stopped) {
       return;
     }
     stopped = true;
-    approvalHandler.stop();
+    _approvalHandler?.stop?.();
     presenceLoop.stop();
     subscription.unsubscribe();
     void connection.drain().catch(async () => {

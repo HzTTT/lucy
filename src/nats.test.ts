@@ -167,6 +167,76 @@ describe("lucy nats transport", () => {
     });
   });
 
+  it("encodes approval events with approval metadata fields", () => {
+    const event: LucyMachineEvent = {
+      version: 2,
+      eventId: "2031409944885334017",
+      type: "approval.pending",
+      timestamp: 1773160847290,
+      channelUserKey: "cuk_demo_user",
+      channelDeviceId: "2031378112080429056",
+      approvalId: "apv_abc123def456",
+      approvalSlug: "apv_abc1",
+      approvalCommand: "mkdir -p /home/lucy/data",
+      approvalCwd: "/home/lucy",
+      approvalHost: "gateway",
+      approvalExpiresAtMs: 1773160900000,
+      approvalAllowedDecisions: ["allow-once", "allow-always", "deny"],
+    };
+
+    expect(JSON.parse(Buffer.from(encodeLucyMachineEvent(event)).toString("utf8"))).toEqual({
+      version: 2,
+      eventId: "2031409944885334017",
+      type: "approval.pending",
+      timestamp: 1773160847290,
+      channel_user_key: "cuk_demo_user",
+      channel_device_id: "2031378112080429056",
+      approvalId: "apv_abc123def456",
+      approval_id: "apv_abc123def456",
+      approvalSlug: "apv_abc1",
+      approval_slug: "apv_abc1",
+      approvalCommand: "mkdir -p /home/lucy/data",
+      approval_command: "mkdir -p /home/lucy/data",
+      approvalCwd: "/home/lucy",
+      approval_cwd: "/home/lucy",
+      approvalHost: "gateway",
+      approval_host: "gateway",
+      approvalExpiresAtMs: 1773160900000,
+      approval_expires_at_ms: 1773160900000,
+      approvalAllowedDecisions: ["allow-once", "allow-always", "deny"],
+      approval_allowed_decisions: ["allow-once", "allow-always", "deny"],
+    });
+  });
+
+  it("encodes approval resolution fields", () => {
+    const event: LucyMachineEvent = {
+      version: 2,
+      eventId: "2031409944885334018",
+      type: "approval.resolved",
+      timestamp: 1773160847291,
+      channelUserKey: "cuk_demo_user",
+      channelDeviceId: "2031378112080429056",
+      approvalId: "apv_abc123def456",
+      approvalDecision: "allow-always",
+      approvalResolvedBy: "cuk_demo_user",
+    };
+
+    expect(JSON.parse(Buffer.from(encodeLucyMachineEvent(event)).toString("utf8"))).toEqual({
+      version: 2,
+      eventId: "2031409944885334018",
+      type: "approval.resolved",
+      timestamp: 1773160847291,
+      channel_user_key: "cuk_demo_user",
+      channel_device_id: "2031378112080429056",
+      approvalId: "apv_abc123def456",
+      approval_id: "apv_abc123def456",
+      approvalDecision: "allow-always",
+      approval_decision: "allow-always",
+      approvalResolvedBy: "cuk_demo_user",
+      approval_resolved_by: "cuk_demo_user",
+    });
+  });
+
   it("sets a bounded connect timeout", () => {
     const options = buildLucyNatsConnectionOptions(createAccount("nats://127.0.0.1:4222"));
     expect(options.timeout).toBe(5_000);

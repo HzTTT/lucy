@@ -39,7 +39,7 @@ vi.mock("./snowflake.js", () => ({
   })),
 }));
 
-vi.mock("openclaw/plugin-sdk/infra-runtime", () => ({
+vi.mock("./exec-approval-helpers.js", () => ({
   buildExecApprovalPendingReplyPayload: vi.fn(),
   getExecApprovalReplyMetadata: vi.fn(() => null),
   resolveExecApprovalCommandDisplay: vi.fn(() => ({ commandText: "echo hello" })),

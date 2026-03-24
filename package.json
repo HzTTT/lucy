@@ -1,6 +1,6 @@
 {
   "name": "@hzttt/lucy",
-  "version": "2026.3.24",
+  "version": "2026.3.25",
   "description": "OpenClaw Lucy NATS DM channel plugin",
   "type": "module",
   "main": "./index.ts",

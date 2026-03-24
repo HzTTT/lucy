@@ -313,17 +313,26 @@ describe("LucyMachineEventSchema approval fields", () => {
 });
 
 describe("LucyExecApprovalHandler", () => {
-  it("start() calls createOperatorApprovalsGatewayClient with correct config and stop() delegates to client", async () => {
+  it("start() loads gateway runtime from the host openclaw entry and stop() delegates to client", async () => {
     // Arrange
     const mockGatewayClient = {
       start: vi.fn(),
       stop: vi.fn(),
     };
     const createClientMock = vi.fn().mockResolvedValue(mockGatewayClient);
+    const hostRequireMock = vi.fn((specifier: string) => {
+      if (specifier === "openclaw/plugin-sdk/gateway-runtime") {
+        return {
+          createOperatorApprovalsGatewayClient: createClientMock,
+        };
+      }
+      throw new Error(`unexpected host require: ${specifier}`);
+    });
+    const createRequireMock = vi.fn(() => hostRequireMock);
 
     vi.resetModules();
-    vi.doMock("openclaw/plugin-sdk/gateway-runtime", () => ({
-      createOperatorApprovalsGatewayClient: createClientMock,
+    vi.doMock("node:module", () => ({
+      createRequire: createRequireMock,
     }));
 
     const mockAccount = {
@@ -351,6 +360,7 @@ describe("LucyExecApprovalHandler", () => {
     );
     await handler.start();
 
+    expect(createRequireMock).toHaveBeenCalled();
     expect(createClientMock).toHaveBeenCalledWith(
       expect.objectContaining({
         config: {},

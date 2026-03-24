@@ -4,7 +4,7 @@ import {
   buildExecApprovalPendingReplyPayload,
   getExecApprovalReplyMetadata,
   resolveExecApprovalCommandDisplay,
-} from "openclaw/plugin-sdk/infra-runtime";
+} from "./exec-approval-helpers.js";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { lucyChannelConfigSchema } from "./config-schema.js";
 import { listLucyAccountIds, resolveLucyAccount, unconfiguredLucyReason } from "./config.js";
