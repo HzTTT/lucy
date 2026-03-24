@@ -9,6 +9,7 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
+import { LucyExecApprovalHandler } from "./exec-approvals-handler.js";
 import { startLucyPresenceLoop } from "./presence.js";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { buildLucySubjects, connectLucyNats, buildLucyDiscoverSubject, buildLucyPingSubject } from "./nats.js";
@@ -535,11 +536,20 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   });
   await presenceLoop.ready;
 
+  const approvalHandler = new LucyExecApprovalHandler(
+    ctx.cfg,
+    boundAccount,
+    deviceState.channelDeviceId,
+    connection,
+  );
+  await approvalHandler.start();
+
   const stop = () => {
     if (stopped) {
       return;
     }
     stopped = true;
+    approvalHandler.stop();
     presenceLoop.stop();
     subscription.unsubscribe();
     void connection.drain().catch(async () => {
