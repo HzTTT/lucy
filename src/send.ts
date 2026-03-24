@@ -21,6 +21,15 @@ type BuildMachineEventParams = {
   toolName?: string;
   metadata?: Record<string, unknown>;
   media?: LucyMediaDescriptor;
+  approvalId?: string;
+  approvalSlug?: string;
+  approvalCommand?: string;
+  approvalCwd?: string;
+  approvalHost?: string;
+  approvalExpiresAtMs?: number;
+  approvalAllowedDecisions?: string[];
+  approvalDecision?: string;
+  approvalResolvedBy?: string;
 };
 
 export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMachineEvent {
@@ -41,6 +50,15 @@ export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMach
     toolName: params.toolName,
     metadata: params.metadata,
     media: params.media,
+    approvalId: params.approvalId,
+    approvalSlug: params.approvalSlug,
+    approvalCommand: params.approvalCommand,
+    approvalCwd: params.approvalCwd,
+    approvalHost: params.approvalHost,
+    approvalExpiresAtMs: params.approvalExpiresAtMs,
+    approvalAllowedDecisions: params.approvalAllowedDecisions,
+    approvalDecision: params.approvalDecision,
+    approvalResolvedBy: params.approvalResolvedBy,
   };
 }
 
@@ -57,6 +75,15 @@ export async function publishLucyMachineEvent(params: {
   toolName?: string;
   metadata?: Record<string, unknown>;
   media?: LucyMediaDescriptor;
+  approvalId?: string;
+  approvalSlug?: string;
+  approvalCommand?: string;
+  approvalCwd?: string;
+  approvalHost?: string;
+  approvalExpiresAtMs?: number;
+  approvalAllowedDecisions?: string[];
+  approvalDecision?: string;
+  approvalResolvedBy?: string;
 }): Promise<LucyMachineEvent> {
   if (!params.account.channelUserKey) {
     throw new Error("lucy channelUserKey is not configured");
