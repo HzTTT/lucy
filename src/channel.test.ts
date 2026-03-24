@@ -39,6 +39,12 @@ vi.mock("./snowflake.js", () => ({
   })),
 }));
 
+vi.mock("openclaw/plugin-sdk/infra-runtime", () => ({
+  buildExecApprovalPendingReplyPayload: vi.fn(),
+  getExecApprovalReplyMetadata: vi.fn(() => null),
+  resolveExecApprovalCommandDisplay: vi.fn(() => ({ commandText: "echo hello" })),
+}));
+
 import {
   lucyPlugin,
   mergeLucyMediaLocalRoots,
@@ -129,5 +135,31 @@ describe("normalizeLucyOutboundTarget", () => {
         ],
       }),
     );
+  });
+});
+
+describe("lucyPlugin.execApprovals", () => {
+  it("getInitiatingSurfaceState returns enabled for a configured account", () => {
+    const cfg = {
+      channels: { lucy: { enabled: true, channelUserKey: "cuk_demo" } },
+    } as any;
+    const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
+      cfg,
+      accountId: "default",
+      account: {} as any,
+      target: {} as any,
+    });
+    expect(result?.kind).toBe("enabled");
+  });
+
+  it("getInitiatingSurfaceState returns disabled for an unconfigured account", () => {
+    const cfg = { channels: {} } as any;
+    const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
+      cfg,
+      accountId: "default",
+      account: {} as any,
+      target: {} as any,
+    });
+    expect(result?.kind).toBe("disabled");
   });
 });

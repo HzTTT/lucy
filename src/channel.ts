@@ -1,5 +1,10 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
+import {
+  buildExecApprovalPendingReplyPayload,
+  getExecApprovalReplyMetadata,
+  resolveExecApprovalCommandDisplay,
+} from "openclaw/plugin-sdk/infra-runtime";
 import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
 import { lucyChannelConfigSchema } from "./config-schema.js";
 import { listLucyAccountIds, resolveLucyAccount, unconfiguredLucyReason } from "./config.js";
@@ -176,6 +181,38 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
         mediaLocalRoots,
         accountId,
       }),
+  },
+  execApprovals: {
+    getInitiatingSurfaceState: ({ cfg, accountId }) =>
+      resolveLucyAccount(cfg, accountId).configured
+        ? { kind: "enabled" as const }
+        : { kind: "disabled" as const },
+
+    hasConfiguredDmRoute: ({ cfg }) =>
+      Boolean(resolveLucyAccount(cfg).configured),
+
+    shouldSuppressLocalPrompt: ({ payload }) =>
+      getExecApprovalReplyMetadata(payload) !== null,
+
+    shouldSuppressForwardingFallback: ({ cfg, target }) =>
+      target.channel === "lucy" && resolveLucyAccount(cfg).configured,
+
+    buildPendingPayload: ({ cfg, request, target, nowMs }) =>
+      buildExecApprovalPendingReplyPayload({
+        approvalId: request.id,
+        approvalSlug: request.id.slice(0, 8),
+        approvalCommandId: request.id,
+        command: resolveExecApprovalCommandDisplay(request.request).commandText,
+        cwd: request.request.cwd ?? undefined,
+        host: request.request.host === "node" ? "node" : "gateway",
+        nodeId: request.request.nodeId ?? undefined,
+        expiresAtMs: request.expiresAtMs,
+        nowMs,
+      }),
+
+    buildResolvedPayload: ({ cfg, resolved, target }) => ({
+      text: `✅ 执行审批已${resolved.decision === "deny" ? "拒绝" : "通过"}`,
+    }),
   },
   status: {
     defaultRuntime: createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID),
