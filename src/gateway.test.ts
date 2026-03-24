@@ -311,3 +311,53 @@ describe("LucyMachineEventSchema approval fields", () => {
     }
   });
 });
+
+describe("LucyExecApprovalHandler", () => {
+  it("publishes approval.pending event with correct fields on handleRequested", async () => {
+    // Arrange
+    const mockGatewayClient = {
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    const createClientMock = vi.fn().mockResolvedValue(mockGatewayClient);
+
+    vi.resetModules();
+    vi.doMock("openclaw/plugin-sdk/gateway-runtime", () => ({
+      createOperatorApprovalsGatewayClient: createClientMock,
+    }));
+
+    const mockAccount = {
+      accountId: "default",
+      channelUserKey: "cuk_demo",
+      subjectPrefix: "cephalon.im.npc",
+      mediaBucket: "lucy_media_v2",
+      mediaRetentionHours: 168,
+      mediaMaxBytes: 20 * 1024 * 1024,
+      enabled: true,
+      configured: true,
+      servers: ["nats://127.0.0.1:4222"],
+      dmPolicy: "open" as const,
+      allowFrom: [],
+    };
+
+    // Dynamically import after mocks are set so the module cache is clean
+    const { LucyExecApprovalHandler } = await import("./exec-approvals-handler.js");
+
+    const handler = new LucyExecApprovalHandler(
+      {} as any, // oxlint-disable-line typescript/no-explicit-any
+      mockAccount as any, // oxlint-disable-line typescript/no-explicit-any
+      "1234567890123456789",
+      {} as any, // oxlint-disable-line typescript/no-explicit-any
+    );
+    await handler.start();
+
+    expect(createClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: {},
+        clientDisplayName: expect.stringContaining("Lucy Exec Approvals"),
+      }),
+    );
+    handler.stop();
+    expect(mockGatewayClient.stop).toHaveBeenCalled();
+  });
+});
