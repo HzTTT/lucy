@@ -42,14 +42,22 @@ export class LucyExecApprovalHandler {
     if (this.started) return;
     this.started = true;
     const { createOperatorApprovalsGatewayClient } = await getGatewayRuntime();
-    this.gatewayClient = await createOperatorApprovalsGatewayClient({
+    const client = await createOperatorApprovalsGatewayClient({
       config: this.cfg,
       clientDisplayName: `Lucy Exec Approvals (${this.account.accountId})`,
       onEvent: (evt: EventFrame) => this.handleGatewayEvent(evt),
       onConnectError: (err: unknown) => {
+        this.started = false;
+        this.gatewayClient = null;
         console.error(`[lucy] exec approvals connect error: ${String(err)}`);
       },
     });
+    if (!this.started) {
+      // stop() was called while we were starting up — discard the client
+      client.stop();
+      return;
+    }
+    this.gatewayClient = client;
     this.gatewayClient.start();
   }
 
@@ -62,9 +70,19 @@ export class LucyExecApprovalHandler {
 
   private handleGatewayEvent(evt: EventFrame): void {
     if (evt.event === "exec.approval.requested") {
-      void this.handleRequested(evt.payload as ExecApprovalRequest);
+      const req = evt.payload as ExecApprovalRequest;
+      if (typeof req?.id === "string") {
+        void this.handleRequested(req).catch((err: unknown) => {
+          console.error(`[lucy] exec approval handleRequested error: ${String(err)}`);
+        });
+      }
     } else if (evt.event === "exec.approval.resolved") {
-      void this.handleResolved(evt.payload as ExecApprovalResolved);
+      const res = evt.payload as ExecApprovalResolved;
+      if (typeof res?.id === "string") {
+        void this.handleResolved(res).catch((err: unknown) => {
+          console.error(`[lucy] exec approval handleResolved error: ${String(err)}`);
+        });
+      }
     }
   }
 
@@ -81,7 +99,7 @@ export class LucyExecApprovalHandler {
       approvalSlug: request.id.slice(0, 8),
       approvalCommand: commandDisplay.commandText,
       approvalCwd: request.request.cwd ?? undefined,
-      // "sandbox" host is coerced to "gateway" — Lucy runs no sandbox host.
+      // Any non-"node" host (including "sandbox" or unknown future values) is coerced to "gateway".
       approvalHost: request.request.host === "node" ? "node" : "gateway",
       approvalExpiresAtMs: request.expiresAtMs,
       approvalAllowedDecisions: ["allow-once", "allow-always", "deny"],

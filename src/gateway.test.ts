@@ -313,7 +313,7 @@ describe("LucyMachineEventSchema approval fields", () => {
 });
 
 describe("LucyExecApprovalHandler", () => {
-  it("publishes approval.pending event with correct fields on handleRequested", async () => {
+  it("start() calls createOperatorApprovalsGatewayClient with correct config and stop() delegates to client", async () => {
     // Arrange
     const mockGatewayClient = {
       start: vi.fn(),
