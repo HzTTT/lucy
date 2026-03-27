@@ -28,7 +28,7 @@ type MediaDescriptor = {
   transport: typeof LUCY_MEDIA_TRANSPORT;
   bucket: string;
   key: string;
-  kind: "image" | "audio";
+  kind: "image" | "audio" | "video" | "document";
   contentType?: string;
   size: number;
   fileName?: string;
@@ -132,7 +132,9 @@ function buildInboundMediaKey(params: {
   ].join("/");
 }
 
-function inferMediaDescriptor(filePath: string): { kind: "image" | "audio"; contentType: string } {
+function inferMediaDescriptor(
+  filePath: string,
+): { kind: "image" | "audio" | "video" | "document"; contentType: string } {
   const ext = path.extname(filePath).toLowerCase();
   const imageTypes: Record<string, string> = {
     ".png": "image/png",
@@ -151,6 +153,28 @@ function inferMediaDescriptor(filePath: string): { kind: "image" | "audio"; cont
     ".opus": "audio/ogg",
     ".flac": "audio/flac",
   };
+  const videoTypes: Record<string, string> = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".webm": "video/webm",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+  };
+  const documentTypes: Record<string, string> = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip",
+  };
 
   const imageContentType = imageTypes[ext];
   if (imageContentType) {
@@ -159,6 +183,14 @@ function inferMediaDescriptor(filePath: string): { kind: "image" | "audio"; cont
   const audioContentType = audioTypes[ext];
   if (audioContentType) {
     return { kind: "audio", contentType: audioContentType };
+  }
+  const videoContentType = videoTypes[ext];
+  if (videoContentType) {
+    return { kind: "video", contentType: videoContentType };
+  }
+  const documentContentType = documentTypes[ext];
+  if (documentContentType) {
+    return { kind: "document", contentType: documentContentType };
   }
   throw new Error(`Unsupported demo media extension: ${ext || "(none)"}`);
 }

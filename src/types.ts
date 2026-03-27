@@ -17,7 +17,7 @@ export const LucyBindingStatusSchema = z.enum(["pending", "registered", "bound"]
 
 export const LucyMessageIdSchema = z.string().regex(/^\d{19}$/);
 export const LucyMetadataSchema = z.record(z.string(), z.unknown());
-export const LucyMediaKindSchema = z.enum(["image", "audio"]);
+export const LucyMediaKindSchema = z.enum(["image", "audio", "video", "document"]);
 
 export const LucyMediaDescriptorSchema = z.object({
   transport: z.literal(LUCY_MEDIA_TRANSPORT),

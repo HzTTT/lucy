@@ -222,14 +222,14 @@ class LucyWebSocketTransport implements Transport {
 
   setupHandlers(): void {
     let connectionError: Error | undefined;
-    this.socket?.on("message", (data) => {
+    this.socket?.on("message", (data: WebSocket.RawData) => {
       this.yields.push(rawDataToUint8Array(data));
       this.signal.resolve();
     });
-    this.socket?.on("error", (err) => {
+    this.socket?.on("error", (err: Error) => {
       connectionError = normalizeConnectError(err);
     });
-    this.socket?.on("close", (code, reason) => {
+    this.socket?.on("close", (code: number, reason: Buffer) => {
       void this._closed(closeErrorFromSocket(code, reason, connectionError), false);
     });
   }
@@ -259,7 +259,7 @@ class LucyWebSocketTransport implements Transport {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    this.socket.send(frame, { binary: true }, (err) => {
+    this.socket.send(frame, { binary: true }, (err?: Error) => {
       if (err && this.options?.debug) {
         console.error(`lucy websocket send failed: ${String(err)}`);
       }

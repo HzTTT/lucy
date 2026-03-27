@@ -146,19 +146,17 @@ describe("lucyPlugin.execApprovals", () => {
     const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
       cfg,
       accountId: "default",
-      account: {} as any,
-      target: {} as any,
     });
     expect(result?.kind).toBe("enabled");
   });
 
   it("getInitiatingSurfaceState returns disabled for an unconfigured account", () => {
-    const cfg = { channels: {} } as any;
+    const cfg = {
+      channels: { lucy: { enabled: true, channelUserKey: "bad.token" } },
+    } as any;
     const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
       cfg,
       accountId: "default",
-      account: {} as any,
-      target: {} as any,
     });
     expect(result?.kind).toBe("disabled");
   });

@@ -48,7 +48,18 @@ function inferMediaKind(params: { contentType?: string; fallbackKind?: string })
   if (contentType.startsWith("audio/")) {
     return "audio";
   }
-  if (params.fallbackKind === "image" || params.fallbackKind === "audio") {
+  if (contentType.startsWith("video/")) {
+    return "video";
+  }
+  if (contentType.startsWith("text/") || contentType.startsWith("application/")) {
+    return "document";
+  }
+  if (
+    params.fallbackKind === "image" ||
+    params.fallbackKind === "audio" ||
+    params.fallbackKind === "video" ||
+    params.fallbackKind === "document"
+  ) {
     return params.fallbackKind;
   }
   return undefined;

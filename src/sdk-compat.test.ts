@@ -21,15 +21,41 @@ async function listProductionTypeScriptFiles(dir: string): Promise<string[]> {
   return files.flat();
 }
 
+function stripLeadingComments(statement: string): string {
+  let trimmed = statement.trimStart();
+  while (true) {
+    if (trimmed.startsWith("//")) {
+      const newlineIndex = trimmed.indexOf("\n");
+      trimmed = newlineIndex >= 0 ? trimmed.slice(newlineIndex + 1).trimStart() : "";
+      continue;
+    }
+    if (trimmed.startsWith("/*")) {
+      const endIndex = trimmed.indexOf("*/");
+      trimmed = endIndex >= 0 ? trimmed.slice(endIndex + 2).trimStart() : "";
+      continue;
+    }
+    return trimmed;
+  }
+}
+
 function listRuntimePluginSdkImportStatements(source: string): string[] {
   return source
     .split(/;\s*\n/g)
     .map((statement) => statement.trim())
     .filter((statement) => statement.includes(`from "openclaw/plugin-sdk`))
-    .filter((statement) => !statement.startsWith("import type "));
+    .filter((statement) => !stripLeadingComments(statement).startsWith("import type "));
 }
 
 describe("OpenClaw SDK runtime compatibility", () => {
+  it("ignores import type statements preceded by comments", () => {
+    expect(
+      listRuntimePluginSdkImportStatements(`
+        // local compatibility note
+        import type { ReplyPayload } from "openclaw/plugin-sdk";
+      `),
+    ).toEqual([]);
+  });
+
   it("avoids runtime plugin-sdk imports in production sources", async () => {
     const files = [
       path.join(pluginRoot, "index.ts"),

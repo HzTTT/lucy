@@ -113,8 +113,12 @@ test("presence loop flushes startup, heartbeat, ping response, and offline broad
   ]);
   assert.equal(connection.flushCount, 1);
 
-  assert.ok(heartbeatCallback);
-  heartbeatCallback?.();
+  const invokeHeartbeat =
+    heartbeatCallback ??
+    (() => {
+      throw new Error("heartbeat callback was not registered");
+    });
+  invokeHeartbeat();
   await nextTick();
 
   assert.equal(connection.flushCount, 2);

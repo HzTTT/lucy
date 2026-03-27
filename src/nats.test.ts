@@ -101,11 +101,11 @@ async function createMockNatsWebSocketServer(): Promise<string> {
   });
   serversToClose.push(wss);
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws: import("ws").WebSocket) => {
     const port = (wss.address() as AddressInfo).port;
     const session: MockSession = { buffer: "" };
     ws.send(createInfoFrame(port));
-    ws.on("message", (data) => {
+    ws.on("message", (data: import("ws").RawData) => {
       session.buffer += Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
       processClientFrames(session, ws);
     });
@@ -122,7 +122,7 @@ afterEach(async () => {
     current.map(
       (server) =>
         new Promise<void>((resolve, reject) => {
-          server.close((err) => {
+          server.close((err?: Error) => {
             if (err) {
               reject(err);
               return;

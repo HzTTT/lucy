@@ -31,7 +31,7 @@ export type ExecApprovalRequestPayload = {
   systemRunPlan?: {
     commandText?: string;
     commandPreview?: string | null;
-  };
+  } | null;
 };
 
 // Escape invisible characters that can spoof approval prompts in common UIs.

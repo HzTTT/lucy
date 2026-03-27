@@ -21,6 +21,7 @@ import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import type {
   LucyInboundMessage,
   LucyInboundMessageV2,
+  LucyMediaKind,
   ResolvedLucyAccount,
 } from "./types.js";
 import { LucyInboundMessageSchema } from "./types.js";
@@ -42,7 +43,7 @@ function normalizeLucyInboundMessage(inbound: LucyInboundMessage): LucyInboundMe
   };
 }
 
-function buildMediaPlaceholder(kind: "image" | "audio"): string {
+function buildMediaPlaceholder(kind: LucyMediaKind): string {
   return `<media:${kind}>`;
 }
 

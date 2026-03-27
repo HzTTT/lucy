@@ -5,7 +5,7 @@ type LucyPresenceConnection = {
   subscribe: (subject: string) => AsyncIterable<unknown> & { unsubscribe: () => void };
 };
 
-type LucyPresenceTimer = unknown;
+type LucyPresenceTimer = ReturnType<typeof setInterval>;
 type LucyPresenceSetInterval = (callback: () => void, delayMs: number) => LucyPresenceTimer;
 type LucyPresenceClearInterval = (timer: LucyPresenceTimer) => void;
 

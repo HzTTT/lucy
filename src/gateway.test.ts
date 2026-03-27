@@ -237,6 +237,88 @@ describe("handleLucyInboundMessage", () => {
     );
   });
 
+  it("accepts document media descriptors in inbound and outbound flows", async () => {
+    downloadMediaSpy.mockResolvedValueOnce({
+      buffer: Buffer.from("%PDF"),
+      contentType: "application/pdf",
+      fileName: "spec.pdf",
+      kind: "document",
+    });
+    uploadMediaSpy.mockResolvedValueOnce({
+      transport: "jetstream-object-store",
+      bucket: "lucy_media_v2",
+      key: "outbound/demo_user/device/event/spec.pdf",
+      kind: "document",
+      contentType: "application/pdf",
+      size: 4,
+      fileName: "spec.pdf",
+      sha256: "abc123",
+    });
+    const { runtime, recordInboundSession, saveMediaBuffer } = createChannelRuntime({
+      finalPayload: {
+        text: "final with document",
+        mediaUrl: "/tmp/spec.pdf",
+      },
+    });
+    saveMediaBuffer.mockResolvedValueOnce({
+      path: "/tmp/spec.pdf",
+      contentType: "application/pdf",
+    });
+
+    await handleLucyInboundMessage({
+      cfg: {
+        channels: {
+          lucy: {
+            channelUserKey: "cuk_demo_user",
+          },
+        },
+      } as OpenClawConfig,
+      account: createAccount(),
+      channelRuntime: runtime,
+      inbound: {
+        version: 2,
+        text: "summarize this document",
+        media: {
+          transport: "jetstream-object-store",
+          bucket: "lucy_media_v2",
+          key: "inbound/demo_user/device/spec.pdf",
+          kind: "document",
+          contentType: "application/pdf",
+          size: 4,
+          fileName: "spec.pdf",
+          sha256: "abc123",
+        },
+      },
+      deviceId: "2080563661542787073",
+    });
+
+    expect(saveMediaBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "application/pdf",
+      "lucy",
+      20 * 1024 * 1024,
+      "spec.pdf",
+    );
+    expect(recordInboundSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ctx: expect.objectContaining({
+          MediaPath: "/tmp/spec.pdf",
+          MediaUrl: "/tmp/spec.pdf",
+          MediaType: "application/pdf",
+        }),
+      }),
+    );
+    expect(publishSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "assistant.final",
+        media: expect.objectContaining({
+          kind: "document",
+          fileName: "spec.pdf",
+        }),
+      }),
+    );
+  });
+
   it("emits an error when payload channelUserKey mismatches the subject namespace", async () => {
     const { runtime } = createChannelRuntime();
     await handleLucyInboundMessage({

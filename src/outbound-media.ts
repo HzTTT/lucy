@@ -70,6 +70,12 @@ function inferMediaKind(params: { contentType?: string; fileName?: string }): st
   if (contentType.startsWith("audio/")) {
     return "audio";
   }
+  if (contentType.startsWith("video/")) {
+    return "video";
+  }
+  if (contentType.startsWith("text/") || contentType.startsWith("application/")) {
+    return "document";
+  }
 
   const extension = path.extname(params.fileName ?? "").toLowerCase();
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif"].includes(extension)) {
@@ -77,6 +83,27 @@ function inferMediaKind(params: { contentType?: string; fileName?: string }): st
   }
   if ([".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"].includes(extension)) {
     return "audio";
+  }
+  if ([".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"].includes(extension)) {
+    return "video";
+  }
+  if (
+    [
+      ".pdf",
+      ".txt",
+      ".md",
+      ".json",
+      ".csv",
+      ".doc",
+      ".docx",
+      ".xls",
+      ".xlsx",
+      ".ppt",
+      ".pptx",
+      ".zip",
+    ].includes(extension)
+  ) {
+    return "document";
   }
   return undefined;
 }
