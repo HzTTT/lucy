@@ -7,7 +7,7 @@
   "scripts": {
     "auth-qrcode": "tsx ./scripts/auth-qrcode.ts",
     "test:unit": "vitest run src/*.test.ts",
-    "test:presence": "tsx --test src/presence.spec.ts",
+    "test:presence": "tsx --test src/presence.test.ts",
     "typecheck": "tsc --project tsconfig.json"
   },
   "files": [

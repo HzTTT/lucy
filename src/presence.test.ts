@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { startLucyPresenceLoop } from "./presence.js";
 
@@ -54,17 +55,21 @@ class FakePresenceConnection {
   publishes: PresenceMessage[] = [];
   flushCount = 0;
   subscription = new ManualSubscription();
+  operations: string[] = [];
 
   publish(subject: string, payload: string) {
+    this.operations.push(`publish:${subject}`);
     this.publishes.push({ subject, payload });
   }
 
   async flush(): Promise<void> {
+    this.operations.push("flush");
     this.flushCount += 1;
   }
 
   subscribe(subject: string) {
     assert.equal(subject, "cephalon.im.npc.cuk_test.2036075953145073664.ping");
+    this.operations.push(`subscribe:${subject}`);
     return this.subscription;
   }
 }
@@ -145,4 +150,48 @@ test("presence loop flushes startup, heartbeat, ping response, and offline broad
     subject: "cephalon.im.npc.cuk_test._discover",
     payload: "offline\n2036075953145073664",
   });
+});
+
+test("presence loop registers ping subscription before startup ready resolves", async () => {
+  const connection = new FakePresenceConnection();
+
+  const loop = startLucyPresenceLoop({
+    connection,
+    discoverSubject: "cephalon.im.npc.cuk_test._discover",
+    pingSubject: "cephalon.im.npc.cuk_test.2036075953145073664.ping",
+    channelUserKey: "cuk_test",
+    channelDeviceId: "2036075953145073664",
+  });
+
+  await loop.ready;
+
+  const subscribeIndex = connection.operations.indexOf(
+    "subscribe:cephalon.im.npc.cuk_test.2036075953145073664.ping",
+  );
+  const firstFlushIndex = connection.operations.indexOf("flush");
+
+  assert.notEqual(subscribeIndex, -1);
+  assert.notEqual(firstFlushIndex, -1);
+  assert.ok(
+    subscribeIndex < firstFlushIndex,
+    "ping subscription should be registered before startup ready flush resolves",
+  );
+
+  loop.stop();
+  await nextTick();
+});
+
+test("presence source declares ping subscription before startup ready publish", () => {
+  const source = fs.readFileSync(new URL("./presence.ts", import.meta.url), "utf8");
+  const subscribeIndex = source.indexOf(
+    "const pingSubscription = params.connection.subscribe(params.pingSubject);",
+  );
+  const readyIndex = source.indexOf("const ready = publishAndFlush(");
+
+  assert.notEqual(subscribeIndex, -1);
+  assert.notEqual(readyIndex, -1);
+  assert.ok(
+    subscribeIndex < readyIndex,
+    "ping subscription should be declared before startup ready publish in source",
+  );
 });

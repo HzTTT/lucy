@@ -136,7 +136,7 @@ Run these from the OpenClaw repo root unless noted otherwise.
 - Probe channel runtime: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe`
 - Stable JSON probe fields: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json`
 - Inspect runtime deps in container: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml exec openclaw-gateway ls -la /app/extensions/lucy/node_modules`
-- iOS demo regression test: `xcodebuildmcp swift-package test --package-path ./extensions/lucy/outside/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests.testMachineEventDecodesCamelCaseChannelDeviceId`
+- iOS demo regression test: `xcodebuildmcp swift-package test --package-path ./extensions/lucy/outside/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests/testMachineEventDecodesCamelCaseChannelDeviceId`
 
 ## Debug workflow
 
