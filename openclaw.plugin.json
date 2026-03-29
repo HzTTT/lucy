@@ -3,6 +3,7 @@
   "name": "Lucy",
   "description": "Lucy NATS DM channel plugin",
   "channels": ["lucy"],
+  "providers": ["cephalon"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

@@ -5,7 +5,7 @@ type LucyPresenceConnection = {
   subscribe: (subject: string) => AsyncIterable<unknown> & { unsubscribe: () => void };
 };
 
-type LucyPresenceTimer = ReturnType<typeof setInterval>;
+type LucyPresenceTimer = NonNullable<Parameters<typeof clearInterval>[0]>;
 type LucyPresenceSetInterval = (callback: () => void, delayMs: number) => LucyPresenceTimer;
 type LucyPresenceClearInterval = (timer: LucyPresenceTimer) => void;
 
@@ -65,6 +65,7 @@ export function startLucyPresenceLoop(params: LucyPresenceLoopParams): LucyPrese
       npc_id: params.channelDeviceId,
     }),
   );
+  const pingSubscription = params.connection.subscribe(params.pingSubject);
   const ready = publishAndFlush(
     params.discoverSubject,
     buildPresencePayload("online", params.channelDeviceId),
@@ -82,7 +83,6 @@ export function startLucyPresenceLoop(params: LucyPresenceLoopParams): LucyPrese
     );
   }, params.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
 
-  const pingSubscription = params.connection.subscribe(params.pingSubject);
   void (async () => {
     try {
       for await (const _msg of pingSubscription) {

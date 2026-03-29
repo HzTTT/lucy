@@ -2,6 +2,7 @@ import type { ChannelPlugin, OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { lucyPlugin } from "./src/channel.js";
 import { defineLucyChannelPluginEntry } from "./src/channel-plugin-entry.js";
 import { registerLucyCommand } from "./src/command.js";
+import { buildLucyCephalonProvider } from "./src/cephalon-provider.js";
 import { setLucyRuntime } from "./src/runtime.js";
 
 export { lucyPlugin } from "./src/channel.js";
@@ -15,6 +16,7 @@ const plugin = defineLucyChannelPluginEntry({
   setRuntime: setLucyRuntime,
   registerFull(api) {
     registerLucyCommand(api);
+    api.registerProvider(buildLucyCephalonProvider());
   },
 });
 

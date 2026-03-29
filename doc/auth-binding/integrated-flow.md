@@ -5,6 +5,7 @@
 - 统一术语
 - 模块职责
 - 主流程
+- 模型配置下发与自动重启补充链路
 - 一张时序图
 
 后续如果插件、iOS App、`npc-im-server`、`user-center` 之间出现理解偏差，以本文为准。
@@ -39,6 +40,8 @@
 - 保存 `bootstrap_token_hash`
 - 保存用户与设备的绑定关系
 - 提供注册、绑定、查询、连接校验接口
+- 为已登录 Lucy 用户提供模型配置接口
+- 懒创建并复用 Lucy / Cephalon 专用 API key
 
 不负责：
 
@@ -56,6 +59,12 @@
 - 轮询绑定状态
 - 拿到绑定后的 `channel_user_key`
 - 用 `channel_user_key + channel_device_id` 连接 NATS
+- 在插件内部注册 `providerId = cephalon`
+- 接收 App 下发的模型配置控制消息
+- 写入 OpenClaw 的 `models.providers.cephalon.*`
+- 写入 `agents.defaults.model.primary`
+- 自动触发 `openclaw gateway restart`
+- 在重启前后发出 machine event 与 presence 信号
 
 ### iOS App
 
@@ -66,6 +75,10 @@
 - 绑定 Lucy 设备
 - 查询当前用户已绑定设备
 - 查询当前用户自己的 `channel_user_key`
+- 查询当前用户的 Lucy 模型配置
+- 渲染当前可选模型列表（当前只有 `kimi-k2.5`）
+- 下发 `provision_model` 控制消息
+- 感知“正在重启 / 即将上线 / 已恢复”
 - 如需要，自己用 `channel_user_key + channel_device_id` 连接 NATS
 
 ### `npc-im-server` / `auth-callout`
@@ -231,6 +244,66 @@ iOS App 先调用：
 - `pass = channel_device_id`
 
 连接 NATS。
+
+### 第八点五步：App 获取 Lucy 模型配置
+
+已登录的 App 调用：
+
+- `GET /v1/channels/lucy/current-user/model-config`
+
+这个接口返回：
+
+- `provider_id`
+- `api_key`
+- `base_url`
+- `default_model_id`
+- `models[]`
+
+约束：
+
+- 当前 `provider_id` 固定为 `cephalon`
+- 当前 `default_model_id` 固定为 `kimi-k2.5`
+- `models[]` 当前只返回 `kimi-k2.5`，但语义上它是未来多模型入口
+- `base_url` 必须由 user-center 按当前环境返回，不能在客户端或插件里写死 `prod` / `test`
+- 该接口第一次访问时会懒创建一枚固定命名的 Lucy 专用 API key，后续重复复用
+
+### 第八点六步：App 下发模型配置并触发自动重启
+
+App 通过当前设备的：
+
+- `client = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.client`
+
+发送一条控制消息：
+
+```json
+{
+  "version": 3,
+  "kind": "provision_model",
+  "messageId": "1773582494346106545",
+  "timestamp": 1773582494346,
+  "channelUserKey": "cuk_xxx",
+  "channelDeviceId": "2031655882831360000",
+  "provision": {
+    "providerId": "cephalon",
+    "modelId": "kimi-k2.5",
+    "apiKey": "sk_xxx",
+    "baseUrl": "https://test.unicorn.org.cn/cephalon/user-center/v1/model",
+    "switchDefaultModel": true,
+    "restartRequested": true
+  }
+}
+```
+
+Lucy 插件收到后：
+
+1. 写入 `models.providers.cephalon`
+2. 写入 `agents.defaults.model.primary = "cephalon/kimi-k2.5"`
+3. 发 `config.updated`
+4. 发 `restart.scheduled`
+5. 自动执行 `openclaw gateway restart`
+6. 关闭前发 `_discover` offline
+7. 启动成功后恢复 `_discover` online
+8. 再发 `restart.completed`
 
 ### 第九步：`auth-callout` 校验连接
 

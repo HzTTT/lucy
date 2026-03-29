@@ -1,10 +1,42 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Scope
 
-Lucy is a TypeScript ESM OpenClaw channel plugin. `index.ts` registers the plugin. Core code lives in `src/`: `channel.ts` defines adapters, `gateway.ts` handles inbound traffic, `send.ts` and `nats.ts` handle transport, and `config.ts`, `config-schema.ts`, `state.ts`, and `types.ts` cover configuration and persisted device state. Tests are colocated as `src/*.test.ts`. Keep metadata in `package.json` and `openclaw.plugin.json`.
+This directory is the `lucy` OpenClaw channel plugin: a DM-only transport that bridges OpenClaw to Lucy clients over NATS. It owns transport, binding, presence, and media transfer; it does **not** own model/provider availability.
 
-## Architecture Role
+When docs and code disagree, treat the current code as the source of truth and update guidance to match the code.
+
+## Read first
+
+- `extensions/lucy/README.md` — operational flow, recommended config, validation commands, and transport-vs-model troubleshooting boundaries.
+- `extensions/lucy/doc/auth-binding/integrated-flow.md` — binding/auth flow across Lucy, `user-center`, iOS, and `auth-callout`.
+- `extensions/lucy/doc/app-nats-integration.md` — app/client protocol contract for NATS subjects, machine events, presence, and media.
+- `extensions/lucy/outside/user-center/docs/lucy-model-config.md` — Lucy `current-user/model-config` contract, lazy API-key creation, and environment-derived `base_url`.
+
+## Related external components (`outside/` symlinks)
+
+For Lucy work, also inspect `extensions/lucy/outside/`. These linked repos are part of the real integration surface.
+
+- `outside/LucyIOSDemo`
+  - iOS client and protocol-validation app.
+  - Check when changing app-facing protocol, BLE pairing UX, machine events, or subject usage.
+  - Key area: `outside/LucyIOSDemo/LucyIOSDemoPackage/Sources/LucyIOSDemoFeature/**`
+- `outside/user-center`
+  - Server-side source of truth for registration, binding, current-user credential lookup, and connection verification.
+  - Check when changing `channel_user_key`, `channel_device_id`, `bootstrap_token`, bind flow, or `/v1/channels/lucy/*` contracts.
+  - Key area: `outside/user-center/internal/routers/channel_binding.go`
+- `outside/npc-im-server`
+  - NATS auth and presence infrastructure.
+  - `auth-callout` verifies Lucy NATS credentials via `user-center` and issues scoped permissions.
+  - `presence-bridge` turns `client.status.report` plus `$SYS.ACCOUNT.>` disconnects into `_discover` online/offline events.
+  - Key areas: `outside/npc-im-server/auth-callout/main.go`, `outside/npc-im-server/presence-bridge/main.py`
+- `outside/blue-wifi`
+  - BLE Wi-Fi provisioning agent.
+  - Reads Lucy's sanitized `pairing-info.json` and exposes it over BLE as `lucy_pairing_info`.
+  - Check when changing BLE pairing handoff or the format/semantics of `pairing-info.json`.
+  - Key area: `outside/blue-wifi/internal/bluewifi/lucy.go`
+
+## Architecture role
 
 Treat this repository as the **OpenClaw-side Lucy channel integration**, not as the source of truth for user identity or binding state.
 
@@ -12,80 +44,132 @@ Treat this repository as the **OpenClaw-side Lucy channel integration**, not as 
   - generate and persist `channel_device_id` / `bootstrap_token`
   - register the device, poll binding state, and persist the bound `channel_user_key`
   - connect OpenClaw to NATS and map inbound/outbound Lucy subjects and media transport
+  - export sanitized pairing state for nearby BLE/onboarding flows
+  - embed-register the `cephalon` provider inside the Lucy plugin package itself
+  - accept `version = 3 / kind = provision_model` control messages
+  - write `models.providers.cephalon.*` and switch `agents.defaults.model.primary`
+  - trigger automatic `openclaw gateway restart` (or configured restart helper override) after provisioning
 - `user-center` responsibilities:
   - own device registration, user-device binding, `channel_user_key`, and connection verification truth
+  - expose `GET /v1/channels/lucy/current-user/model-config`
+  - lazily create and then reuse the Lucy-specific model API key
 - `outside/npc-im-server/auth-callout` responsibilities:
   - validate `channel_user_key + channel_device_id` with `user-center`
   - mint minimal NATS permissions for the validated device pair
+- `outside/npc-im-server/presence-bridge` responsibilities:
+  - consume `client.status.report` and NATS disconnect events
+  - broadcast `_discover` online/offline presence
+- `outside/blue-wifi` responsibilities:
+  - read Lucy's local pairing export and expose it over BLE
 - iOS / external clients responsibilities:
-  - scan or fetch Lucy credentials and talk to the same NATS subjects from the client side
+  - scan QR or fetch BLE pairing info to obtain `channel_device_id`
+  - call `user-center` bind/current-user APIs
+  - talk to the same NATS subjects from the client side
 
-When working on auth or transport flows, use `doc/auth-binding/integrated-flow.md` as the contract. Keep the terminology aligned with that document: `channel_user_key`, `channel_device_id`, and `bootstrap_token`. Treat `outside/` as integration-support code for the broader architecture, while `src/` remains the primary product code for this package.
+Keep terminology aligned with the integration docs: `channel_user_key`, `channel_device_id`, and `bootstrap_token`.
 
-## Build, Test, and Development Commands
+## Project structure and key code
 
-This package has no standalone build script; OpenClaw loads `index.ts` directly at runtime.
+Lucy is a TypeScript ESM OpenClaw channel plugin.
 
-- `npm install` in this directory installs Lucy's dependencies when working outside the workspace.
-- From the parent OpenClaw root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d` starts OpenClaw plus the local NATS broker.
-- From the parent root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe` verifies Lucy's human-readable health status.
-- From the parent root: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` prints the stable machine-readable `deviceId` / subjects / media probe fields.
-- From the parent root: `bun extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <deviceId>` opens the demo client.
-- From the parent root: `pnpm test:extensions` or `vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"` runs extension tests.
+- `extensions/lucy/index.ts` — plugin entrypoint
+- `extensions/lucy/src/channel.ts` — top-level `ChannelPlugin` definition
+- `extensions/lucy/src/gateway.ts` — inbound message pipeline and runtime event mirroring
+- `extensions/lucy/src/send.ts` — machine-event publication
+- `extensions/lucy/src/nats.ts` — NATS connection and subject helpers
+- `extensions/lucy/src/presence.ts` — `client.status.report`, `_discover`, and `ping` behavior
+- `extensions/lucy/src/media.ts` — JetStream Object Store upload/download
+- `extensions/lucy/src/auth-binding.ts` — registration + binding sync
+- `extensions/lucy/src/user-center.ts` — HTTP calls to `user-center`
+- `extensions/lucy/src/state.ts` — persisted local device state (`device-state.json`)
+- `extensions/lucy/src/pairing-export.ts` — sanitized BLE pairing export (`pairing-info.json`)
+- `extensions/lucy/src/types.ts` — zod schemas and protocol types
 
-## Debug Workflow
+## Startup and binding flow
 
-Use a boundary-first workflow. Prove the cheapest layer first, then move outward. Do not patch Docker, transport, and provider config in one pass.
+Gateway startup is binding-first:
 
-1. Prove Lucy itself before deployment.
-- Run focused tests for `extensions/lucy/src/*.test.ts`.
-- Run targeted TypeScript checks on Lucy files with `--skipLibCheck`.
-- If these fail, fix code first and do not start Docker debugging yet.
+1. `startLucyGateway()` goes through `syncLucyBindingState()`.
+2. The plugin ensures local device state exists.
+3. It registers the device with `user-center` and polls bind status.
+4. Once bound, it hydrates the account with `channel_user_key`.
+5. It connects NATS and subscribes to `{subjectPrefix}.{channelUserKey}.{channelDeviceId}.client`.
+6. It publishes replies/events to the sibling `.machine` subject.
 
-2. Bring up the smallest useful stack.
-- Build from the OpenClaw root with `docker build --build-arg OPENCLAW_EXTENSIONS=lucy -t openclaw:local -f Dockerfile .`.
-- Start only the pieces needed to debug the channel: NATS and the gateway.
-- If using temp config or workspace dirs, keep them stable for the whole session so `deviceId` and channel state do not move underneath you.
+The normal production path learns `channelDeviceId`, `bootstrapToken`, and `channelUserKey` dynamically from local state plus `user-center`; do not treat them as static config unless explicitly debugging compatibility.
 
-3. Separate framework/config failure from plugin failure.
-- Read gateway logs before changing code.
-- Use `channels status --probe` after each meaningful change for human health checks.
-- Use `gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json` when you need stable machine-readable `deviceId` / subjects / media probe fields.
-- If status says `configured, works, stopped`, inspect Lucy lifecycle code before transport wiring.
-- If the gateway is crash-looping, do not depend on `openclaw-cli` containers that share `network_mode: service:openclaw-gateway`; inspect or edit the mounted config directly.
+## Cross-repo change checklist
 
-4. Verify runtime dependency visibility inside the container.
-- A successful image build does not prove runtime resolution works.
-- If logs show `Cannot find module 'nats'` or similar, inspect both `/app/extensions/lucy/node_modules` and `/app/node_modules`.
-- For local deploys, keep the compose mount that exposes `./extensions/lucy/node_modules:/app/extensions/lucy/node_modules`.
+- Protocol fields or machine events changed:
+  - update `extensions/lucy/src/**`
+  - verify `outside/LucyIOSDemo/**`
+- Binding semantics or `user-center` API changed:
+  - update `extensions/lucy/src/auth-binding.ts`, `extensions/lucy/src/user-center.ts`
+  - verify `outside/user-center/**`
+- Model provisioning / auto-restart / embedded `cephalon` provider changed:
+  - update `extensions/lucy/src/cephalon-provider.ts`, `extensions/lucy/src/provider-provisioning.ts`, `extensions/lucy/src/restart-ticket.ts`, `extensions/lucy/src/gateway.ts`, `extensions/lucy/src/types.ts`
+  - verify `outside/user-center/internal/{routers,controllers,handlers,types}/channel_binding.go`
+  - verify `outside/LucyIOSDemo/LucyIOSDemoPackage/Sources/LucyIOSDemoFeature/{LucyModels,LucyServices,LucyRootView,LucySettingsSheetView,LucyRedesignedRootScene}.swift`
+  - update docs in all three repos together so provider id, model id, event names, restart behavior, and `base_url` semantics stay aligned
+- Presence / `_discover` / `ping` / `client.status.report` / NATS auth changed:
+  - update `extensions/lucy/src/presence.ts`, `extensions/lucy/src/gateway.ts`, `extensions/lucy/src/nats.ts`
+  - verify `outside/npc-im-server/**`
+- Pairing export changed:
+  - update `extensions/lucy/src/pairing-export.ts`
+  - verify `outside/blue-wifi/**` and `outside/LucyIOSDemo/**`
 
-5. Verify transport before model auth.
-- Treat bus events as hard boundaries:
-  - `inbound.accepted`: NATS subjects, channel routing, and inbound dispatch are working.
-  - `assistant.start` or `assistant.partial`: model execution started.
-  - `assistant.final` with upstream auth text or HTTP 401: channel transport is healthy; provider config is the blocker.
-- Do not keep changing Lucy when the failure is already above the channel layer.
+## Build, test, and development commands
 
-6. Use a long-wait probe for final verification.
-- Short demo clients only catch immediate failures.
-- For real verification, publish one message and wait 10-15 seconds for `assistant.final`.
-- Prefer a raw NATS subscriber/publisher when you need exact event order.
+Run these from the OpenClaw repo root unless noted otherwise.
 
-## Debug Commands
-
-Run these from the OpenClaw root unless noted otherwise.
-
+- Install dependencies if needed: `pnpm install`
 - Focused tests: `vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"`
 - Targeted typecheck: `pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/src/*.ts`
-- Build image with Lucy included: `docker build --build-arg OPENCLAW_EXTENSIONS=lucy -t openclaw:local -f Dockerfile .`
-- Start local stack with stable temp dirs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d nats openclaw-gateway`
-- Inspect gateway logs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml logs openclaw-gateway --tail=200`
+- Optional local NATS: `docker compose -f extensions/lucy/docker-compose.nats.yml up -d nats`
+- Print bind QR: `pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json`
+- Transport smoke test: `pnpm exec tsx extensions/lucy/scripts/demo-chat.ts --server nats://chat.lucy.run:4222 --channel-user-key <channel_user_key> --channel-device-id <channel_device_id> --text "Reply with exactly LUCY_E2E_OK." --wait-ms 25000`
+- Plugin helper commands:
+  - `openclaw lucy auth-qrcode`
+  - `openclaw lucy reset-state`
+- Local stack (stable temp dirs): `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d nats openclaw-gateway`
+- Gateway logs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml logs openclaw-gateway --tail=200`
 - Probe channel runtime: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe`
 - Stable JSON probe fields: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json`
 - Inspect runtime deps in container: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml exec openclaw-gateway ls -la /app/extensions/lucy/node_modules`
-- Demo client: `node_modules/.bin/tsx extensions/lucy/scripts/demo-chat.ts --api-key demo_user --device-id <deviceId>`
+- iOS demo regression test: `xcodebuildmcp swift-package test --package-path ./extensions/lucy/outside/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests.testMachineEventDecodesCamelCaseChannelDeviceId`
 
-## Failure Signals
+## Debug workflow
+
+Use a boundary-first workflow. Prove the cheapest layer first, then move outward.
+
+1. Prove Lucy locally first.
+- Run focused tests and targeted typechecks.
+- If these fail, fix code before Docker or infra debugging.
+
+2. Bring up the smallest useful stack.
+- Start NATS and the gateway first.
+- Keep config/workspace dirs stable so `deviceId` and bind state do not drift.
+
+3. Separate plugin failure from framework/config failure.
+- Read gateway logs before changing code.
+- Use `channels status --probe` for human checks.
+- Use `gateway call channels.status ... --json` for stable machine-readable fields.
+- If status says `configured, works, stopped`, inspect Lucy lifecycle/startup logic.
+
+4. Verify runtime dependency visibility inside containers.
+- A successful image build does not prove runtime resolution works.
+- If logs show `Cannot find module 'nats'`, inspect both `/app/extensions/lucy/node_modules` and `/app/node_modules`.
+
+5. Verify transport before model auth.
+- `inbound.accepted` means NATS subjects, channel routing, and inbound dispatch are working.
+- `assistant.start` / `assistant.partial` means model execution started.
+- `assistant.final` with upstream auth text or HTTP 401 means Lucy transport is healthy and provider config is the blocker.
+
+6. Use a longer wait for final verification.
+- Publish one message and wait long enough for `assistant.final`.
+- Prefer raw NATS subscriber/publisher when you need exact event order.
+
+## Failure signals
 
 - `auto-restart attempt N/10`:
   Lucy startup is returning too early or throwing during account start.
@@ -102,35 +186,34 @@ Run these from the OpenClaw root unless noted otherwise.
 - Repeated accepted/final events for one inbound message:
   suspect gateway auto-restart and duplicate listener registration before blaming NATS.
 
-## Coding Style & Naming Conventions
+## Coding style and naming
 
-Use TypeScript ESM with 2-space indentation, semicolons, and explicit `.js` suffixes in relative imports. Keep Lucy-specific exports clear, for example `resolveLucyAccount` and `LucyProbe`. Prefer small pure helpers for config parsing and NATS subject logic instead of duplicating validation. When available in the parent workspace, use `oxfmt` and `oxlint` through `pnpm format` and `pnpm check`.
+Use TypeScript ESM with 2-space indentation, semicolons, and explicit `.js` suffixes in relative imports. Prefer small pure helpers for config parsing, subject logic, and protocol normalization instead of duplicating validation.
 
-## Testing Guidelines
+## Testing guidelines
 
-Vitest is the test framework, and test files should stay as `*.test.ts` beside the code they cover. Favor unit tests for config resolution, state persistence, subject generation, and gateway event emission before Docker-only verification. Lucy does not define a repo-local coverage threshold, so new branches and protocol rules should come with adjacent tests.
+Vitest is the test framework. Keep tests as `*.test.ts` beside the code they cover. Favor protocol-seam and integration-seam tests for config resolution, state persistence, subject generation, pairing export, and gateway event emission before Docker-only verification.
 
-## Commit & Pull Request Guidelines
+## Security and configuration tips
 
-This git root currently has no commit history, so there is no Lucy-specific convention to copy. Follow the surrounding OpenClaw style: short, imperative subjects such as `fix(lucy): reject invalid apiKey tokens` or `Lucy: tighten subject validation`. Keep PRs narrow, explain config or transport impact, link related issues, and include manual verification steps or probe output for Docker or channel-status changes.
+Never commit real `channel_user_key`, NATS credentials, generated `channelDeviceId`, or `bootstrapToken` values. Use placeholders that still satisfy the runtime format rules because these values are used in subjects, auth, and protocol payloads.
 
-## Security & Configuration Tips
+Keep runtime packages in `dependencies`; keep `openclaw` in `devDependencies` or `peerDependencies` only so plugin installs remain compatible with the host loader.
 
-Never commit real `apiKey`, NATS credentials, or generated `deviceId` values. Use placeholder tokens that still satisfy `^[A-Za-z0-9_-]+$`, because Lucy uses them as NATS subject segments. Keep runtime packages in `dependencies`; keep `openclaw` in `devDependencies` only so plugin installs remain compatible with OpenClaw's loader.
+## OpenClaw SDK compatibility
 
-## OpenClaw SDK Compatibility
+Treat the host `openclaw` package as the effective plugin SDK version.
 
-Treat the host `openclaw` package as the effective plugin SDK version. There is no separate, independently versioned `@openclaw/plugin-sdk` package on npm; `plugin-sdk` is a set of subpath exports from `openclaw` itself.
+- Prefer `openclaw/plugin-sdk` for generic plugin APIs.
+- Do not depend on `openclaw/plugin-sdk/compat` from Lucy.
+- Use narrower subpaths only when Lucy intentionally requires a host version known to export them.
+- When making SDK-facing changes, verify Lucy against the oldest and newest host versions you claim to support.
 
-- For external/community plugins such as Lucy, prefer the root `openclaw/plugin-sdk` entry for generic plugin APIs and helpers. This is the broad compatibility surface OpenClaw keeps for external plugins.
-- Do not depend on `openclaw/plugin-sdk/compat` in Lucy. OpenClaw documents `compat` as a bundled/internal surface, and older host versions may not export it at all.
-- Use `openclaw/plugin-sdk/core` or channel-specific subpaths only when Lucy intentionally requires a minimum OpenClaw version that is known to export them. Pin and document that minimum host version before shipping.
-- Keep `openclaw` in `devDependencies` or `peerDependencies`, never in runtime `dependencies`. Plugin installs resolve the SDK from the host loader at runtime.
-- When making SDK-facing changes, verify Lucy against the oldest and newest OpenClaw host versions you claim to support. Treat export-path changes as compatibility risks even when TypeScript still passes locally.
-
-## Notes And Pitfalls
+## Notes and pitfalls
 
 - `docker build` must receive `--build-arg OPENCLAW_EXTENSIONS=lucy`; setting only a shell env var is not enough for the Dockerfile path that installs extension deps.
-- For bus-backed adapters such as Lucy, account startup should stay blocked until `abortSignal`. Spawning a background loop and returning early can trigger OpenClaw auto-restart and duplicate inbound handling.
-- A green build is not enough. Always check the running container filesystem and `channels status --probe`; when scripting against Lucy probe fields, prefer `gateway call channels.status ... --json`.
+- For bus-backed adapters such as Lucy, account startup should stay blocked until `abortSignal`; spawning a background loop and returning early can trigger OpenClaw auto-restart and duplicate inbound handling.
+- A green build is not enough. Always check the running container filesystem and `channels status --probe`; when scripting against probe fields, prefer `gateway call channels.status ... --json`.
 - When the gateway container is already restarting, prefer fixing the mounted config file directly over trying to use dependent CLI containers.
+- Current model-provisioning design is **not** a separate `cephalon` plugin package. The `cephalon` provider is registered from inside Lucy itself.
+- Do not hardcode `prod` / `test` model gateway URLs in Lucy, LucyIOSDemo, or `user-center`. `base_url` must follow the active environment and come from configuration or the `current-user/model-config` response.

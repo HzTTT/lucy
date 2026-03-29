@@ -50,6 +50,9 @@ export const LucyConfigSchema = z.object({
   mediaRetentionHours: z.number().int().positive().optional(),
   mediaMaxMb: z.number().positive().optional(),
   mediaLocalRoots: z.array(z.string().min(1)).optional(),
+  restartHelperCommand: z.string().min(1).optional(),
+  restartHelperArgs: z.array(z.string().min(1)).optional(),
+  restartOnlineTimeoutMs: z.number().int().positive().optional(),
 });
 
 export type LucyConfig = z.infer<typeof LucyConfigSchema>;
@@ -94,11 +97,63 @@ export const LucyInboundMessageV2Schema = z
     }
   });
 
-export const LucyInboundMessageSchema = z.union([LucyInboundMessageV2Schema, LucyInboundMessageV1Schema]);
+export const LucyProvisioningPayloadSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string().min(1),
+  baseUrl: z.string().url().optional(),
+  switchDefaultModel: z.boolean().optional(),
+  restartRequested: z.boolean().optional(),
+});
+
+export const LucyInboundMessageV3Schema = z
+  .object({
+    version: z.literal(3),
+    kind: z.enum(["chat", "provision_model"]),
+    messageId: LucyMessageIdSchema.optional(),
+    text: z.string().optional(),
+    media: LucyMediaDescriptorSchema.optional(),
+    provision: LucyProvisioningPayloadSchema.optional(),
+    timestamp: z.number().int().optional(),
+    metadata: LucyMetadataSchema.optional(),
+    channelUserKey: z.string().optional(),
+    channelDeviceId: LucyMessageIdSchema.optional(),
+    apiKey: z.string().optional(),
+    deviceId: LucyMessageIdSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === "chat") {
+      const hasText = Boolean(value.text?.trim());
+      if (!hasText && !value.media) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "text or media is required",
+          path: ["text"],
+        });
+      }
+      return;
+    }
+
+    if (!value.provision) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "provision is required",
+        path: ["provision"],
+      });
+    }
+  });
+
+export const LucyInboundMessageSchema = z.union([
+  LucyInboundMessageV3Schema,
+  LucyInboundMessageV2Schema,
+  LucyInboundMessageV1Schema,
+]);
 
 export type LucyInboundMessageV1 = z.infer<typeof LucyInboundMessageV1Schema>;
 export type LucyInboundMessageV2 = z.infer<typeof LucyInboundMessageV2Schema>;
+export type LucyInboundMessageV3 = z.infer<typeof LucyInboundMessageV3Schema>;
 export type LucyInboundMessage = z.infer<typeof LucyInboundMessageSchema>;
+export type LucyProvisioningPayload = z.infer<typeof LucyProvisioningPayloadSchema>;
 
 export const LucyMachineEventTypeSchema = z.enum([
   "inbound.accepted",
@@ -112,6 +167,10 @@ export const LucyMachineEventTypeSchema = z.enum([
   "error",
   "approval.pending",
   "approval.resolved",
+  "config.updated",
+  "config.error",
+  "restart.scheduled",
+  "restart.completed",
 ]);
 
 export type LucyMachineEventType = z.infer<typeof LucyMachineEventTypeSchema>;
@@ -171,6 +230,9 @@ export type ResolvedLucyAccount = {
   mediaRetentionHours: number;
   mediaMaxBytes: number;
   mediaLocalRoots?: string[];
+  restartHelperCommand?: string;
+  restartHelperArgs?: string[];
+  restartOnlineTimeoutMs?: number;
 };
 
 export type LucySubjects = {

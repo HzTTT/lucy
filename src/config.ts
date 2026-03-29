@@ -56,6 +56,9 @@ export function resolveLucyAccount(
   const mediaRetentionHours = raw.mediaRetentionHours ?? DEFAULT_MEDIA_RETENTION_HOURS;
   const mediaMaxMb = raw.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaLocalRoots = raw.mediaLocalRoots?.map((entry) => entry.trim()).filter(Boolean);
+  const restartHelperCommand = raw.restartHelperCommand?.trim() || undefined;
+  const restartHelperArgs = raw.restartHelperArgs?.map((entry) => entry.trim()).filter(Boolean);
+  const restartOnlineTimeoutMs = raw.restartOnlineTimeoutMs;
   const allowFrom =
     raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ??
     (channelUserKey ? [channelUserKey] : []);
@@ -89,6 +92,9 @@ export function resolveLucyAccount(
     mediaRetentionHours,
     mediaMaxBytes: Math.floor(mediaMaxMb * 1024 * 1024),
     mediaLocalRoots,
+    restartHelperCommand,
+    restartHelperArgs,
+    restartOnlineTimeoutMs,
   };
 }
 

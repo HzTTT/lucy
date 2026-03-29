@@ -9,6 +9,10 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
+import {
+  handleLucyProvisioningMessage,
+  publishLucyRestartCompletionIfPending,
+} from "./provider-provisioning.js";
 // Import handler with lazy loading for backward compatibility
 // (older openclaw versions may not have gateway-runtime / infra-runtime)
 let _approvalHandler: any = null;
@@ -20,6 +24,7 @@ import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import type {
   LucyInboundMessage,
+  LucyInboundMessageV3,
   LucyInboundMessageV2,
   LucyMediaKind,
   ResolvedLucyAccount,
@@ -41,6 +46,12 @@ function normalizeLucyInboundMessage(inbound: LucyInboundMessage): LucyInboundMe
     channelUserKey: inbound.channelUserKey ?? inbound.apiKey,
     channelDeviceId: inbound.channelDeviceId ?? inbound.deviceId,
   };
+}
+
+function isLucyProvisioningInboundMessage(
+  inbound: LucyInboundMessage,
+): inbound is LucyInboundMessageV3 & { kind: "provision_model"; provision: NonNullable<LucyInboundMessageV3["provision"]> } {
+  return inbound.version === 3 && "kind" in inbound && inbound.kind === "provision_model";
 }
 
 function buildMediaPlaceholder(kind: LucyMediaKind): string {
@@ -255,10 +266,50 @@ export async function handleLucyInboundMessage(params: {
       return;
     }
 
-    const inbound = normalizeLucyInboundMessage({
+    const parsedInbound = {
       ...parsed.data,
       messageId: parsed.data.messageId ?? getProcessSnowflakeGenerator().nextId(),
-    });
+    } as LucyInboundMessage;
+
+    if (isLucyProvisioningInboundMessage(parsedInbound)) {
+      const inboundChannelUserKey = parsedInbound.channelUserKey ?? parsedInbound.apiKey;
+      const inboundChannelDeviceId = parsedInbound.channelDeviceId ?? parsedInbound.deviceId;
+      if (inboundChannelUserKey && inboundChannelUserKey !== params.account.channelUserKey) {
+        await publishLucyMachineEvent({
+          account: params.account,
+          connection: params.connection,
+          deviceId: params.deviceId,
+          type: "config.error",
+          sourceMessageId: parsedInbound.messageId,
+          text: "payload channelUserKey does not match subject namespace",
+        });
+        return;
+      }
+      if (inboundChannelDeviceId && inboundChannelDeviceId !== params.deviceId) {
+        await publishLucyMachineEvent({
+          account: params.account,
+          connection: params.connection,
+          deviceId: params.deviceId,
+          type: "config.error",
+          sourceMessageId: parsedInbound.messageId,
+          text: "payload channelDeviceId does not match subject namespace",
+        });
+        return;
+      }
+
+      await handleLucyProvisioningMessage({
+        cfg: params.cfg,
+        account: params.account,
+        connection: params.connection,
+        deviceId: params.deviceId,
+        sourceMessageId: parsedInbound.messageId,
+        provision: parsedInbound.provision,
+        log: params.log,
+      });
+      return;
+    }
+
+    const inbound = normalizeLucyInboundMessage(parsedInbound);
 
     if (inbound.channelUserKey && inbound.channelUserKey !== params.account.channelUserKey) {
       await publishLucyMachineEvent({
@@ -539,6 +590,11 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     log: ctx.log,
   });
   await presenceLoop.ready;
+  await publishLucyRestartCompletionIfPending({
+    account: boundAccount,
+    connection,
+    deviceId: deviceState.channelDeviceId,
+  });
 
   // Try to load and start approval handler (backward compatible with older openclaw)
   if (!_loadAttempted) {

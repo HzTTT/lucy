@@ -22,6 +22,8 @@
    - `channel_user_key`
    - `channel_device_id`
 5. 成功连接 NATS
+6. 如需自动切换模型，当前用户还应能访问：
+   - `GET /v1/channels/lucy/current-user/model-config`
 
 当前推荐流程不是手工配置固定 `demo_user`，而是：
 
@@ -42,6 +44,7 @@
 1. `POST /v1/login`
 2. `GET /v1/channels/lucy/current-user/device-bindings`
 3. `GET /v1/channels/lucy/current-user/credential`
+4. `GET /v1/channels/lucy/current-user/model-config`
 
 当前真实响应示例：
 
@@ -77,6 +80,38 @@
   }
 }
 ```
+
+### `current-user/model-config`
+
+```json
+{
+  "code": 20000,
+  "msg": "操作成功",
+  "data": {
+    "channel": "lucy",
+    "provider_id": "cephalon",
+    "api_key": "sk_xxx",
+    "base_url": "https://test.unicorn.org.cn/cephalon/user-center/v1/model",
+    "default_model_id": "kimi-k2.5",
+    "created": false,
+    "models": [
+      {
+        "id": "kimi-k2.5",
+        "label": "Kimi K2.5",
+        "enabled": true,
+        "is_default": true
+      }
+    ]
+  }
+}
+```
+
+说明：
+
+- `provider_id` 当前固定为 `cephalon`
+- `models[]` 当前只有 `kimi-k2.5`，但客户端 UI 应按列表渲染，给未来多模型扩展预留入口
+- `base_url` 必须视当前 user-center 环境返回，客户端和插件都不应写死 prod / test
+- `created` 表示这次访问是否懒创建了 Lucy 专用 API key
 
 ## 3. 连接方式
 
@@ -164,7 +199,10 @@ online
 
 ## 5. App -> Lucy：入站消息协议
 
-当前推荐使用 `version = 2`。
+当前推荐同时支持：
+
+- `version = 2`：普通聊天消息
+- `version = 3`：控制消息（例如模型配置下发）
 
 ### 文本消息示例
 
@@ -228,6 +266,36 @@ Lucy 当前代码仍兼容这些旧字段：
 - `channelUserKey`
 - `channelDeviceId`
 
+### 模型配置下发消息示例
+
+```json
+{
+  "version": 3,
+  "kind": "provision_model",
+  "messageId": "1773582494346106547",
+  "timestamp": 1773582494348,
+  "channelUserKey": "cuk_demo_user",
+  "channelDeviceId": "2031655882831360000",
+  "metadata": {
+    "platform": "ios"
+  },
+  "provision": {
+    "providerId": "cephalon",
+    "modelId": "kimi-k2.5",
+    "apiKey": "sk_xxx",
+    "baseUrl": "https://test.unicorn.org.cn/cephalon/user-center/v1/model",
+    "switchDefaultModel": true,
+    "restartRequested": true
+  }
+}
+```
+
+约束：
+
+- 当前只支持 `providerId = cephalon`
+- 当前只支持 `modelId = kimi-k2.5`
+- 该消息不会进入普通聊天 agent 链路，而是由 Lucy 插件直接处理
+
 ## 6. Lucy -> App：machine event 协议
 
 当前 machine event 为 `version = 2`，典型顺序如下：
@@ -238,6 +306,14 @@ Lucy 当前代码仍兼容这些旧字段：
 4. `tool.start` / `tool.end`（可选）
 5. `assistant.partial`（0..n）
 6. `assistant.final`
+
+当 App 下发模型配置时，会额外出现：
+
+1. `config.updated`
+2. `restart.scheduled`
+3. `_discover` offline
+4. `_discover` online
+5. `restart.completed`
 
 ### 当前真实事件样例
 
@@ -285,6 +361,10 @@ Lucy 当前代码仍兼容这些旧字段：
 - `tool.start`
 - `tool.end`
 - `error`
+- `config.updated`
+- `config.error`
+- `restart.scheduled`
+- `restart.completed`
 
 ### iOS / Swift 客户端必须兼容的字段名
 
@@ -300,6 +380,21 @@ Lucy 当前代码仍兼容这些旧字段：
 - `deviceId`
 
 否则会直接解码失败。
+
+### 自动重启语义
+
+当 Lucy 接收到有效的 `provision_model` 消息后：
+
+1. 先写入 OpenClaw 的 `models.providers.cephalon.*`
+2. 再把主 agent 默认模型切到 `cephalon/kimi-k2.5`
+3. 发 `config.updated`
+4. 发 `restart.scheduled`
+5. 自动执行 `openclaw gateway restart`
+
+因此 App 不应把 `restart.scheduled` 理解为“请用户手动点击重启”，而应把它理解为：
+
+- “设备已接收配置，正在自动重启”
+- 随后等待 `_discover` offline / online 与 `restart.completed`
 
 ## 7. 媒体上传 / 下载
 
