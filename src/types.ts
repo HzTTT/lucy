@@ -7,6 +7,9 @@ export const DEFAULT_NATS_SERVER = "nats://127.0.0.1:4222";
 export const DEFAULT_MEDIA_BUCKET = "lucy_media_v2";
 export const DEFAULT_MEDIA_RETENTION_HOURS = 168;
 export const DEFAULT_MEDIA_MAX_MB = 20;
+export const DEFAULT_LOCAL_NOTIFY_BIND = "127.0.0.1";
+export const DEFAULT_LOCAL_NOTIFY_PORT = 8788;
+export const DEFAULT_LOCAL_NOTIFY_PATH = "/usb-events";
 export const DEVICE_STATE_VERSION = 2;
 export const LUCY_USER_CENTER_BASE_URL = "https://prod.unicorn.org.cn/cephalon/user-center";
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
@@ -31,6 +34,27 @@ export const LucyMediaDescriptorSchema = z.object({
 });
 
 export const LucyDmPolicySchema = z.enum(["allowlist", "open", "disabled"]);
+export const LucyLocalNotifyConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  bind: z.string().min(1).optional(),
+  port: z.number().int().positive().max(65535).optional(),
+  path: z.string().min(1).optional(),
+});
+
+export const LucyLocalNotifyCodeSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+]);
+
+export const LucyLocalNotifyPayloadSchema = z.object({
+  code: LucyLocalNotifyCodeSchema,
+  device: z.string().min(1),
+  timestamp: z.string().min(1),
+  message: z.string(),
+});
 
 export const LucyConfigSchema = z.object({
   name: z.string().optional(),
@@ -50,6 +74,7 @@ export const LucyConfigSchema = z.object({
   mediaRetentionHours: z.number().int().positive().optional(),
   mediaMaxMb: z.number().positive().optional(),
   mediaLocalRoots: z.array(z.string().min(1)).optional(),
+  localNotify: LucyLocalNotifyConfigSchema.optional(),
   restartHelperCommand: z.string().min(1).optional(),
   restartHelperArgs: z.array(z.string().min(1)).optional(),
   restartOnlineTimeoutMs: z.number().int().positive().optional(),
@@ -60,6 +85,9 @@ export type LucyBindingStatus = z.infer<typeof LucyBindingStatusSchema>;
 export type LucyDmPolicy = z.infer<typeof LucyDmPolicySchema>;
 export type LucyMediaKind = z.infer<typeof LucyMediaKindSchema>;
 export type LucyMediaDescriptor = z.infer<typeof LucyMediaDescriptorSchema>;
+export type LucyLocalNotifyConfig = z.infer<typeof LucyLocalNotifyConfigSchema>;
+export type LucyLocalNotifyCode = z.infer<typeof LucyLocalNotifyCodeSchema>;
+export type LucyLocalNotifyPayload = z.infer<typeof LucyLocalNotifyPayloadSchema>;
 
 export const LucyInboundMessageV1Schema = z.object({
   version: z.literal(1),
@@ -230,6 +258,12 @@ export type ResolvedLucyAccount = {
   mediaRetentionHours: number;
   mediaMaxBytes: number;
   mediaLocalRoots?: string[];
+  localNotify?: {
+    enabled: true;
+    bind: string;
+    port: number;
+    path: string;
+  };
   restartHelperCommand?: string;
   restartHelperArgs?: string[];
   restartOnlineTimeoutMs?: number;

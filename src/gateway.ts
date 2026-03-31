@@ -9,6 +9,7 @@ import {
   ensureLucyMediaStore,
   uploadLucyMediaFromSource,
 } from "./media.js";
+import { startLucyLocalNotifyServer } from "./local-notify.js";
 import {
   handleLucyProvisioningMessage,
   publishLucyRestartCompletionIfPending,
@@ -589,12 +590,30 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     channelDeviceId: deviceState.channelDeviceId,
     log: ctx.log,
   });
-  await presenceLoop.ready;
-  await publishLucyRestartCompletionIfPending({
-    account: boundAccount,
-    connection,
-    deviceId: deviceState.channelDeviceId,
-  });
+  let localNotifyServer: Awaited<ReturnType<typeof startLucyLocalNotifyServer>> | null = null;
+  try {
+    await presenceLoop.ready;
+    localNotifyServer = boundAccount.localNotify
+      ? await startLucyLocalNotifyServer({
+          account: boundAccount,
+          connection,
+          deviceId: deviceState.channelDeviceId,
+          notify: boundAccount.localNotify,
+          log: ctx.log,
+        })
+      : null;
+    await publishLucyRestartCompletionIfPending({
+      account: boundAccount,
+      connection,
+      deviceId: deviceState.channelDeviceId,
+    });
+  } catch (err) {
+    await localNotifyServer?.stop().catch(() => undefined);
+    presenceLoop.stop();
+    subscription.unsubscribe();
+    await connection.close().catch(() => undefined);
+    throw err;
+  }
 
   // Try to load and start approval handler (backward compatible with older openclaw)
   if (!_loadAttempted) {
@@ -624,6 +643,9 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     _approvalHandler?.stop?.();
     presenceLoop.stop();
     subscription.unsubscribe();
+    void localNotifyServer?.stop().catch((err) => {
+      ctx.log?.warn?.(`[lucy] local notify shutdown failed: ${String(err)}`);
+    });
     void connection.drain().catch(async () => {
       await connection.close();
     });
@@ -649,6 +671,7 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
       channelDeviceId: deviceState.channelDeviceId,
       bindingStatus: deviceState.bindingStatus,
       bindingCheckUrl: buildLucyBindingCheckUrl(deviceState.channelDeviceId),
+      localNotifyUrl: localNotifyServer?.url ?? null,
     },
   });
   ctx.log?.info(

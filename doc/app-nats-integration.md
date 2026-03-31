@@ -350,6 +350,15 @@ Lucy 当前代码仍兼容这些旧字段：
 | `metadata` | 否 | 扩展信息，不保证结构稳定 |
 | `media` | 否 | `assistant.final` 的媒体 descriptor |
 
+### 主动系统消息
+
+Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId` 的 `assistant.final`。当前已使用的场景包括：
+
+- `message` 工具主动向 `lucy:<channel_user_key>` 推送内容
+- 本地 `channels.lucy.localNotify` HTTP 入口接收到系统通知
+
+客户端应把这类事件当成“主动消息”处理，而不是强依赖它一定能关联到一条用户输入。
+
 ### 事件类型
 
 - `inbound.accepted`
@@ -387,14 +396,69 @@ Lucy 当前代码仍兼容这些旧字段：
 
 1. 先写入 OpenClaw 的 `models.providers.cephalon.*`
 2. 再把主 agent 默认模型切到 `cephalon/kimi-k2.5`
-3. 发 `config.updated`
-4. 发 `restart.scheduled`
-5. 自动执行 `openclaw gateway restart`
+3. 如果已启用 `plugins.entries.multimodal-rag`，且其 `ollama.baseUrl` 或 `whisper.zhipuApiBaseUrl` 已配置为绝对 `cephalon ... /v1/model` URL，则把同一份 `apiKey` 额外写入对应的 `ollama.apiKey` / `whisper.zhipuApiKey`
+4. 非 cephalon URL、相对路径、或未启用的 `multimodal-rag` 配置不会被自动改写
+5. 发 `config.updated`
+6. 发 `restart.scheduled`
+7. 自动执行 `openclaw gateway restart`
 
 因此 App 不应把 `restart.scheduled` 理解为“请用户手动点击重启”，而应把它理解为：
 
 - “设备已接收配置，正在自动重启”
 - 随后等待 `_discover` offline / online 与 `restart.completed`
+
+## 6.1 Lucy 本地通知 HTTP 入口
+
+当 Lucy 配置了：
+
+```json
+{
+  "channels": {
+    "lucy": {
+      "localNotify": {
+        "enabled": true,
+        "bind": "127.0.0.1",
+        "port": 8788,
+        "path": "/usb-events"
+      }
+    }
+  }
+}
+```
+
+它会在本机监听 `http://127.0.0.1:8788/usb-events`，接收本地 daemon 发送的：
+
+```json
+{
+  "code": 1,
+  "device": "/dev/sdb1",
+  "timestamp": "2026-03-30T19:02:00.000000",
+  "message": ""
+}
+```
+
+然后把它转换成主动推送的 `assistant.final`：
+
+- `text` 为用户可读文案，例如 `U盘同步完成（/dev/sdb1）`
+- `metadata` 用扁平字符串字段保留原始语义：
+
+```json
+{
+  "localNotifyCode": "3",
+  "localNotifyCodeName": "usb.synced",
+  "localNotifyDevice": "/dev/sdb1",
+  "localNotifyTimestamp": "2026-03-30T19:02:00.000000",
+  "localNotifyMessage": ""
+}
+```
+
+当前 `codeName` 约定：
+
+- `1` -> `usb.inserted`
+- `2` -> `usb.syncing`
+- `3` -> `usb.synced`
+- `4` -> `usb.failed`
+- `5` -> `usb.removed`
 
 ## 7. 媒体上传 / 下载
 

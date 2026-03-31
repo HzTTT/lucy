@@ -65,6 +65,37 @@ openclaw lucy auth-qrcode
 }
 ```
 
+如果你要把本机的 USB 同步 daemon 事件回报给 Lucy，可以额外开启一个本地 HTTP 通知入口：
+
+```json5
+{
+  "channels": {
+    "lucy": {
+      "enabled": true,
+      "servers": ["nats://chat.lucy.run:4222"],
+      "localNotify": {
+        "enabled": true,
+        "bind": "127.0.0.1",
+        "port": 8788,
+        "path": "/usb-events"
+      }
+    }
+  }
+}
+```
+
+daemon 侧把：
+
+```json
+{
+  "notify": {
+    "url": "http://127.0.0.1:8788/usb-events"
+  }
+}
+```
+
+指向 Lucy 即可。
+
 Lucy 会自动处理以下状态，不需要手工写入：
 
 - `channel_device_id`
@@ -112,10 +143,12 @@ Lucy 收到 `provision_model` 控制消息后会：
 
 1. 写入 `models.providers.cephalon`
 2. 写入 `agents.defaults.model.primary`
-3. 发 `config.updated`
-4. 发 `restart.scheduled`
-5. 自动执行 `openclaw gateway restart`
-6. 启动后发 `restart.completed`
+3. 如果已启用 `plugins.entries.multimodal-rag`，且其 `ollama.baseUrl` 或 `whisper.zhipuApiBaseUrl` 已配置为绝对 `cephalon ... /v1/model` URL，则把同一份 App 下发的 `apiKey` 额外写入对应的 `ollama.apiKey` / `whisper.zhipuApiKey`
+4. 非 cephalon URL、相对路径、或未启用的 `multimodal-rag` 配置不会被自动改写
+5. 发 `config.updated`
+6. 发 `restart.scheduled`
+7. 自动执行 `openclaw gateway restart`
+8. 启动后发 `restart.completed`
 
 ## 注意事项
 
@@ -134,6 +167,46 @@ Lucy 收到 `provision_model` 控制消息后会：
   - `restart.scheduled`
   - `_discover` offline / online
   - `restart.completed`
+
+## 本地 USB 通知入口
+
+当 `channels.lucy.localNotify.enabled = true` 时，Lucy 会在本机启动一个只监听本地地址的 HTTP 服务，默认配置为：
+
+- `bind = 127.0.0.1`
+- `port = 8788`
+- `path = /usb-events`
+
+当前只接受：
+
+- `POST`
+- JSON body
+
+请求体格式：
+
+```json
+{
+  "code": 1,
+  "device": "/dev/sdb1",
+  "timestamp": "2026-03-30T19:02:00.000000",
+  "message": ""
+}
+```
+
+事件码会被 Lucy 映射为主动推送的 `assistant.final`，因此 App 不需要额外升级协议就能直接显示：
+
+- `1` -> `U盘已插入`
+- `2` -> `U盘同步中`
+- `3` -> `U盘同步完成`
+- `4` -> `U盘同步失败`
+- `5` -> `U盘已拔出`
+
+这类通知没有 `sourceMessageId`，会作为 Lucy 的主动系统消息出现；原始字段会以扁平字符串字段放进 machine event 的 `metadata` 中，当前键名为：
+
+- `localNotifyCode`
+- `localNotifyCodeName`
+- `localNotifyDevice`
+- `localNotifyTimestamp`
+- `localNotifyMessage`
 
 ## 验证接入
 

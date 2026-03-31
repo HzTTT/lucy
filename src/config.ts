@@ -1,6 +1,9 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   DEFAULT_ACCOUNT_ID,
+  DEFAULT_LOCAL_NOTIFY_BIND,
+  DEFAULT_LOCAL_NOTIFY_PATH,
+  DEFAULT_LOCAL_NOTIFY_PORT,
   DEFAULT_MEDIA_BUCKET,
   DEFAULT_MEDIA_MAX_MB,
   DEFAULT_MEDIA_RETENTION_HOURS,
@@ -18,6 +21,41 @@ function resolveLucyConfig(cfg: OpenClawConfig): LucyConfig {
     return {};
   }
   return section as LucyConfig;
+}
+
+function normalizeLocalNotifyPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed === "/") {
+    return trimmed;
+  }
+  const prefixed = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return prefixed.endsWith("/") ? prefixed.slice(0, -1) : prefixed;
+}
+
+export function isValidLocalNotifyPort(value: number | undefined): boolean {
+  return Number.isInteger(value) && value! > 0 && value! <= 65_535;
+}
+
+export function isValidLocalNotifyPath(value: string | undefined): boolean {
+  const normalized = normalizeLocalNotifyPath(value);
+  return Boolean(normalized && normalized.startsWith("/"));
+}
+
+function resolveLucyLocalNotify(raw: LucyConfig): ResolvedLucyAccount["localNotify"] {
+  const section = raw.localNotify;
+  if (!section || typeof section !== "object" || Array.isArray(section) || section.enabled === false) {
+    return undefined;
+  }
+
+  return {
+    enabled: true,
+    bind: section.bind?.trim() || DEFAULT_LOCAL_NOTIFY_BIND,
+    port: section.port ?? DEFAULT_LOCAL_NOTIFY_PORT,
+    path: normalizeLocalNotifyPath(section.path) ?? DEFAULT_LOCAL_NOTIFY_PATH,
+  };
 }
 
 export function isValidSubjectToken(value: string | undefined): boolean {
@@ -45,6 +83,7 @@ export function resolveLucyAccount(
   accountId?: string | null,
 ): ResolvedLucyAccount {
   const raw = resolveLucyConfig(cfg);
+  const localNotify = resolveLucyLocalNotify(raw);
   const channelUserKey = raw.channelUserKey?.trim() || raw.apiKey?.trim() || undefined;
   const channelDeviceId = raw.channelDeviceId?.trim() || undefined;
   const bootstrapToken = raw.bootstrapToken?.trim() || undefined;
@@ -71,7 +110,11 @@ export function resolveLucyAccount(
     Number.isFinite(mediaRetentionHours) &&
     mediaRetentionHours > 0 &&
     Number.isFinite(mediaMaxMb) &&
-    mediaMaxMb > 0;
+    mediaMaxMb > 0 &&
+    (!localNotify ||
+      (Boolean(localNotify.bind.trim()) &&
+        isValidLocalNotifyPort(localNotify.port) &&
+        isValidLocalNotifyPath(localNotify.path)));
 
   return {
     accountId: accountId?.trim() || DEFAULT_ACCOUNT_ID,
@@ -92,6 +135,7 @@ export function resolveLucyAccount(
     mediaRetentionHours,
     mediaMaxBytes: Math.floor(mediaMaxMb * 1024 * 1024),
     mediaLocalRoots,
+    localNotify,
     restartHelperCommand,
     restartHelperArgs,
     restartOnlineTimeoutMs,
@@ -116,6 +160,15 @@ export function unconfiguredLucyReason(account: ResolvedLucyAccount): string {
   }
   if (!Number.isFinite(account.mediaMaxBytes) || account.mediaMaxBytes <= 0) {
     return "mediaMaxMb must be greater than 0";
+  }
+  if (account.localNotify && !account.localNotify.bind.trim()) {
+    return "localNotify.bind is required when localNotify is enabled";
+  }
+  if (account.localNotify && !isValidLocalNotifyPort(account.localNotify.port)) {
+    return "localNotify.port must be an integer between 1 and 65535";
+  }
+  if (account.localNotify && !isValidLocalNotifyPath(account.localNotify.path)) {
+    return "localNotify.path must start with /";
   }
   if (account.servers.length === 0) {
     return "at least one NATS server is required";

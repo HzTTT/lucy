@@ -35,8 +35,98 @@ export type LucyRestartSpawn = (
   options: SpawnOptions,
 ) => LucyRestartChildProcess;
 
+const LUCY_MULTIMODAL_RAG_PLUGIN_ID = "multimodal-rag";
+const LUCY_CEPHALON_MODEL_PATH = "/cephalon/user-center/v1/model";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeAbsoluteCephalonModelUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  const pathname = parsed.pathname.replace(/\/+$/u, "");
+  if (pathname !== LUCY_CEPHALON_MODEL_PATH) {
+    return null;
+  }
+
+  return `${parsed.origin}${pathname}`;
+}
+
+function applyLucyMultimodalRagProvisioningConfig(
+  cfg: OpenClawConfig,
+  provision: LucyProvisioningPayload,
+): OpenClawConfig {
+  const provisionBaseUrl = normalizeAbsoluteCephalonModelUrl(provision.baseUrl);
+  if (!provisionBaseUrl) {
+    return cfg;
+  }
+
+  const existingPlugins = isRecord(cfg.plugins) ? cfg.plugins : null;
+  const existingEntries = existingPlugins && isRecord(existingPlugins.entries)
+    ? (existingPlugins.entries as Record<string, unknown>)
+    : null;
+  const existingEntry = existingEntries?.[LUCY_MULTIMODAL_RAG_PLUGIN_ID];
+  if (!isRecord(existingEntry) || existingEntry.enabled !== true || !isRecord(existingEntry.config)) {
+    return cfg;
+  }
+
+  const nextPluginConfig = {
+    ...existingEntry.config,
+  } as Record<string, unknown>;
+  let changed = false;
+
+  if (isRecord(nextPluginConfig.ollama)) {
+    const nextOllama = {
+      ...nextPluginConfig.ollama,
+    } as Record<string, unknown>;
+    if (normalizeAbsoluteCephalonModelUrl(nextOllama.baseUrl)) {
+      nextOllama.apiKey = provision.apiKey;
+      nextPluginConfig.ollama = nextOllama;
+      changed = true;
+    }
+  }
+
+  if (isRecord(nextPluginConfig.whisper)) {
+    const nextWhisper = {
+      ...nextPluginConfig.whisper,
+    } as Record<string, unknown>;
+    if (
+      nextWhisper.provider === "zhipu" &&
+      normalizeAbsoluteCephalonModelUrl(nextWhisper.zhipuApiBaseUrl)
+    ) {
+      nextWhisper.zhipuApiKey = provision.apiKey;
+      nextPluginConfig.whisper = nextWhisper;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return cfg;
+  }
+
+  return {
+    ...cfg,
+    plugins: {
+      ...(cfg.plugins ?? {}),
+      entries: {
+        ...(cfg.plugins?.entries ?? {}),
+        [LUCY_MULTIMODAL_RAG_PLUGIN_ID]: {
+          ...existingEntry,
+          config: nextPluginConfig,
+        },
+      },
+    },
+  };
 }
 
 function resolveLucyWritableConfigRuntime(): LucyWritableConfigRuntime {
@@ -134,7 +224,7 @@ export function applyLucyProvisioningConfig(
     };
   }
 
-  return {
+  const nextCfg: OpenClawConfig = {
     ...cfg,
     models: {
       ...(cfg.models ?? {}),
@@ -145,6 +235,8 @@ export function applyLucyProvisioningConfig(
       defaults: nextDefaults as OpenClawConfig["agents"] extends { defaults?: infer T } ? T : never,
     },
   };
+
+  return applyLucyMultimodalRagProvisioningConfig(nextCfg, provision);
 }
 
 export async function spawnLucyRestartHelper(params: {
@@ -312,4 +404,3 @@ export async function publishLucyRestartCompletionIfPending(params: {
   });
   await clearLucyRestartTicket();
 }
-

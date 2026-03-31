@@ -47,6 +47,50 @@ describe("lucy config", () => {
     expect(account.mediaLocalRoots).toEqual(["/srv/lucy-media", "/mnt/attachments"]);
   });
 
+  it("resolves local notify defaults when enabled", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            channelUserKey: "cuk_demo_user",
+            localNotify: {
+              enabled: true,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+
+    expect(account.localNotify).toEqual({
+      enabled: true,
+      bind: "127.0.0.1",
+      port: 8788,
+      path: "/usb-events",
+    });
+    expect(account.configured).toBe(true);
+  });
+
+  it("treats invalid local notify ports as unconfigured", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            channelUserKey: "cuk_demo_user",
+            localNotify: {
+              enabled: true,
+              port: 70000,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+
+    expect(account.configured).toBe(false);
+    expect(unconfiguredLucyReason(account)).toContain("localNotify.port");
+  });
+
   it("treats invalid channelUserKey tokens as unconfigured", () => {
     const account = resolveLucyAccount(
       {

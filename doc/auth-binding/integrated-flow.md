@@ -298,12 +298,14 @@ Lucy 插件收到后：
 
 1. 写入 `models.providers.cephalon`
 2. 写入 `agents.defaults.model.primary = "cephalon/kimi-k2.5"`
-3. 发 `config.updated`
-4. 发 `restart.scheduled`
-5. 自动执行 `openclaw gateway restart`
-6. 关闭前发 `_discover` offline
-7. 启动成功后恢复 `_discover` online
-8. 再发 `restart.completed`
+3. 如果已启用 `plugins.entries.multimodal-rag`，且其 `ollama.baseUrl` 或 `whisper.zhipuApiBaseUrl` 已配置为绝对 `cephalon ... /v1/model` URL，则把同一份 `apiKey` 额外写入对应的 `ollama.apiKey` / `whisper.zhipuApiKey`
+4. 非 cephalon URL、相对路径、或未启用的 `multimodal-rag` 配置不会被自动改写
+5. 发 `config.updated`
+6. 发 `restart.scheduled`
+7. 自动执行 `openclaw gateway restart`
+8. 关闭前发 `_discover` offline
+9. 启动成功后恢复 `_discover` online
+10. 再发 `restart.completed`
 
 ### 第九步：`auth-callout` 校验连接
 
