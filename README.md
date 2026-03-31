@@ -96,6 +96,8 @@ daemon 侧把：
 
 指向 Lucy 即可。
 
+如果你把 `localNotify.port` 或 `localNotify.path` 改成别的值，daemon 侧的 `notify.url` 也必须同步调整；Lucy 不会帮你做端口映射或 URL 兼容。
+
 Lucy 会自动处理以下状态，不需要手工写入：
 
 - `channel_device_id`
@@ -207,6 +209,8 @@ Lucy 收到 `provision_model` 控制消息后会：
 - `localNotifyDevice`
 - `localNotifyTimestamp`
 - `localNotifyMessage`
+
+这里必须保持“扁平字符串字典”。当前 iOS `LucyMachineEvent.metadata` 解码类型仍是 `[String: String]?`，如果再改回嵌套对象，App 会在 machine event 解码阶段直接失败。
 
 ## 验证接入
 

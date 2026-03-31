@@ -347,7 +347,7 @@ Lucy 当前代码仍兼容这些旧字段：
 | `sessionKey` | 否 | OpenClaw session key |
 | `text` | 否 | partial/final/reasoning/error 文本 |
 | `toolName` | 否 | tool.start/tool.end 使用 |
-| `metadata` | 否 | 扩展信息，不保证结构稳定 |
+| `metadata` | 否 | 扩展信息，不保证结构稳定；当前 iOS 客户端按 `[String: String]?` 解码，所以新增字段时优先使用扁平字符串键值 |
 | `media` | 否 | `assistant.final` 的媒体 descriptor |
 
 ### 主动系统消息
@@ -437,6 +437,8 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 }
 ```
 
+`port` 和 `path` 都是配置项，不是协议常量。如果 Lucy 改成监听例如 `http://127.0.0.1:8000/usb-events`，本地 daemon 的 `notify.url` 也必须同步改成同一个地址。
+
 然后把它转换成主动推送的 `assistant.final`：
 
 - `text` 为用户可读文案，例如 `U盘同步完成（/dev/sdb1）`
@@ -459,6 +461,8 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 - `3` -> `usb.synced`
 - `4` -> `usb.failed`
 - `5` -> `usb.removed`
+
+不要把这组本地通知元数据改回嵌套对象。当前 iOS `LucyMachineEvent` 会把 `metadata` 直接解成 `[String: String]?`，嵌套 JSON 会导致整条 machine event 解码失败。
 
 ## 7. 媒体上传 / 下载
 
