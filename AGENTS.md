@@ -138,6 +138,22 @@ Run these from the OpenClaw repo root unless noted otherwise.
 - Inspect runtime deps in container: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml exec openclaw-gateway ls -la /app/extensions/lucy/node_modules`
 - iOS demo regression test: `xcodebuildmcp swift-package test --package-path ./extensions/lucy/outside/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests/testMachineEventDecodesCamelCaseChannelDeviceId`
 
+## iPhone verification loop
+
+For app-facing changes under `outside/LucyIOSDemo/**`, the default completion loop is:
+
+1. Run the relevant `swift test --package-path outside/LucyIOSDemo/LucyIOSDemoPackage ...` verification first.
+2. Automatically build and run on a connected physical iPhone with `xcodebuildmcp`; do not stop at simulator-only verification when a device is available.
+3. Prefer the connected device named `宏仔头的iPhone (2)`; the current known UDID is `C6EE7005-94ED-5C16-87D7-875DD6ACB13F`. Re-check availability with `xcodebuildmcp device list` each session instead of assuming the device state is unchanged.
+4. Use `xcodebuildmcp device build-and-run --project-path ./outside/LucyIOSDemo/LucyIOSDemo.xcodeproj --scheme LucyIOSDemo --device-id <UDID> --platform iOS` as the default real-device run command.
+5. After a successful device launch, derive the app path and bundle id with:
+   - `xcodebuildmcp device get-app-path --project-path ./outside/LucyIOSDemo/LucyIOSDemo.xcodeproj --scheme LucyIOSDemo --platform iOS`
+   - `xcodebuildmcp device get-app-bundle-id --app-path <APP_PATH>`
+6. Start device log capture before handing the build to the user with `xcodebuildmcp device start-device-log-capture --device-id <UDID> --bundle-id <BUNDLE_ID>`, keep the returned `log-session-id`, then explicitly wait for the user to finish manual testing.
+7. After the user says testing is done, stop capture with `xcodebuildmcp device stop-device-log-capture --log-session-id <LOG_SESSION_ID>`, inspect the logs, and include any relevant runtime findings in the close-out.
+8. Do not claim the Lucy iOS app change is fully verified until the real-device build, the user's manual check, and the post-test log review have all happened, unless the user explicitly waives that loop.
+9. If no physical iPhone is connected or device launch/log capture fails, report the blocker clearly, include the exact failing step, and fall back to simulator verification only as a degraded path.
+
 ## Debug workflow
 
 Use a boundary-first workflow. Prove the cheapest layer first, then move outward.

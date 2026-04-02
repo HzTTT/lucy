@@ -298,7 +298,7 @@ Lucy 插件收到后：
 
 1. 写入 `models.providers.cephalon`
 2. 写入 `agents.defaults.model.primary = "cephalon/kimi-k2.5"`
-3. 如果已启用 `plugins.entries.multimodal-rag`，且其 `ollama.baseUrl` 或 `whisper.zhipuApiBaseUrl` 已配置为绝对 `cephalon ... /v1/model` URL，则把同一份 `apiKey` 额外写入对应的 `ollama.apiKey` / `whisper.zhipuApiKey`
+3. 如果已启用 `plugins.entries.multimodal-rag`，且其 `ollama.baseUrl` 已配置为绝对 `cephalon ... /v1/model` URL，或 `whisper.zhipuApiBaseUrl` 已配置为绝对 `cephalon ... /v1/model` / `cephalon ... /v1/model/v1` URL，则把同一份 `apiKey` 额外写入对应的 `ollama.apiKey` / `whisper.zhipuApiKey`
 4. 非 cephalon URL、相对路径、或未启用的 `multimodal-rag` 配置不会被自动改写
 5. 发 `config.updated`
 6. 发 `restart.scheduled`

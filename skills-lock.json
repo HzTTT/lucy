@@ -5,6 +5,16 @@
       "source": "/Users/hongzaitou/.claude/skills/openclaw-channel-dev",
       "sourceType": "local",
       "computedHash": "e0b0b5827dc22b7d87d541c287460cef8884247e4c347c705de34e9a0551dd69"
+    },
+    "swift-concurrency": {
+      "source": "avdlee/swift-concurrency-agent-skill",
+      "sourceType": "github",
+      "computedHash": "05ef28a2e0eb4eacd6a958cf07c1f5bd5d600e147c844b26dde42a9bdd2f633d"
+    },
+    "swiftui-expert-skill": {
+      "source": "avdlee/swiftui-agent-skill",
+      "sourceType": "github",
+      "computedHash": "c47bb793f0155ba33896d3a157040a1b42c3a491258d3891f717962b54e5fd4d"
     }
   }
 }
