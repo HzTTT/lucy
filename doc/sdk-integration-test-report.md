@@ -21,8 +21,10 @@
 | 推理输出 | ✅ | reasoning.partial/final 事件正常 |
 | 工具调用 | ✅ | tool.start/tool.end 事件正常 |
 | Iroh Blob 往返 | ✅ | blobPut → blobFetch 内容完全一致 |
-| 图片消息 | ✅ | 1x1 PNG → NPC 识别并描述图片内容 |
-| Machine event 完整序列 | ✅ | accepted → start → reasoning → partial → final |
+| App → NPC 图片消息 | ✅ | 1x1 PNG → NPC 识别并描述图片内容 |
+| NPC → App 图片消息 | ✅ | agent 用 message 工具发送本地图片，App blobFetch 下载 45707 bytes 完全匹配 |
+| CLI message send --media | ✅ | assistant.final 带 iroh-blob media descriptor |
+| Machine event 完整序列 | ✅ | accepted → start → reasoning → tool → partial → final |
 
 ## 完整调用流程
 
