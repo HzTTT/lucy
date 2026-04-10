@@ -8,14 +8,9 @@ import { LucyMachineEventSchema, LucyMachineEventTypeSchema } from "./types.js";
 const publishSpy = vi.fn();
 const downloadMediaSpy = vi.fn();
 const uploadMediaSpy = vi.fn();
-const closeConnectionSpy = vi.fn();
 
 vi.mock("./media.js", () => ({
   downloadLucyMediaDescriptor: vi.fn((params) => downloadMediaSpy(params)),
-  ensureLucyMediaStore: vi.fn(async () => ({
-    store: {},
-    jsm: {},
-  })),
   uploadLucyMediaFromSource: vi.fn((params) => uploadMediaSpy(params)),
 }));
 
@@ -24,26 +19,35 @@ vi.mock("./send.js", async (importOriginal) => {
   return {
     ...actual,
     publishLucyMachineEvent: vi.fn(async (params) => {
-    publishSpy(params);
-    return {
-      version: 2,
-      eventId: params.eventId ?? "2080563661542787072",
-      type: params.type,
-      timestamp: Date.now(),
-      channelUserKey: params.account.channelUserKey ?? "",
-      channelDeviceId: params.deviceId ?? "2080563661542787073",
-      media: params.media,
-    };
-  }),
+      publishSpy(params);
+      return {
+        version: 2,
+        eventId: params.eventId ?? "2080563661542787072",
+        type: params.type,
+        timestamp: Date.now(),
+        channelUserKey: params.cuk ?? "",
+        channelDeviceId: params.cdi ?? "2080563661542787073",
+        media: params.media,
+      };
+    }),
   };
 });
 
+// Stub nats.ts (no longer exports connectLucyNats etc., but the mock keeps tests isolated)
 vi.mock("./nats.js", () => ({
-  buildLucySubjects: vi.fn(),
-  connectLucyNats: vi.fn(async () => ({
-    close: closeConnectionSpy,
-  })),
+  buildNpcSubscribeSubject: vi.fn((userId: string, cdi: string) => `cephalon.im.npc.${userId}.${cdi}`),
+  buildNpcPublishSubject: vi.fn((userId: string) => `cephalon.im.user.${userId}`),
+  serializeLucyMachineEventJson: vi.fn(() => "{}"),
 }));
+
+function createMockSession() {
+  return {
+    publishChannel: vi.fn(async () => undefined),
+    subscribeChannel: vi.fn(async () => undefined),
+    accessToken: vi.fn(() => "cuk_demo_user"),
+    shutdown: vi.fn(async () => undefined),
+  };
+}
 
 function createChannelRuntime(options?: {
   finalPayload?: { text?: string; mediaUrl?: string; mediaUrls?: string[] };
@@ -98,14 +102,13 @@ function createAccount() {
     accountId: "default",
     enabled: true,
     configured: true,
-    channelUserKey: "cuk_demo_user",
-    channelDeviceId: "2080563661542787073",
-    servers: ["nats://127.0.0.1:4222"],
+    userCenterDomain: "user-center.lucy.run",
+    lucyServerDomain: "chat.lucy.run",
+    homeDir: "~/data/lucy_im/",
+    kind: "lucy" as const,
     subjectPrefix: "cephalon.im.npc",
     dmPolicy: "allowlist" as const,
     allowFrom: ["cuk_demo_user"],
-    mediaBucket: "lucy_media_v2",
-    mediaRetentionHours: 168,
     mediaMaxBytes: 20 * 1024 * 1024,
   };
 }
@@ -115,34 +118,30 @@ describe("handleLucyInboundMessage", () => {
     publishSpy.mockClear();
     downloadMediaSpy.mockReset();
     uploadMediaSpy.mockReset();
-    closeConnectionSpy.mockReset();
-    closeConnectionSpy.mockResolvedValue(undefined);
     downloadMediaSpy.mockResolvedValue({
       buffer: Buffer.from("image"),
       contentType: "image/png",
       fileName: "photo.png",
-      kind: "image",
     });
     uploadMediaSpy.mockResolvedValue({
-      transport: "jetstream-object-store",
-      bucket: "lucy_media_v2",
-      key: "outbound/demo_user/device/event/reply.png",
+      transport: "iroh-blob",
+      blob_ref: "blob:abc123",
       kind: "image",
       contentType: "image/png",
       size: 5,
       fileName: "reply.png",
-      sha256: "abc123",
     });
     setLucyRuntime({} as unknown as PluginRuntime);
   });
 
   it("publishes accepted, tool, reasoning, partial, and final events", async () => {
     const { runtime } = createChannelRuntime();
+    const session = createMockSession();
     await handleLucyInboundMessage({
       cfg: {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
           },
         },
       } as OpenClawConfig,
@@ -152,7 +151,10 @@ describe("handleLucyInboundMessage", () => {
         version: 1,
         text: "hello",
       },
-      deviceId: "2080563661542787073",
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
     });
 
     expect(publishSpy.mock.calls.map(([params]) => params.type)).toEqual(
@@ -176,11 +178,12 @@ describe("handleLucyInboundMessage", () => {
         mediaUrl: "/tmp/reply.png",
       },
     });
+    const session = createMockSession();
     await handleLucyInboundMessage({
       cfg: {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
           },
         },
       } as OpenClawConfig,
@@ -190,17 +193,18 @@ describe("handleLucyInboundMessage", () => {
         version: 2,
         text: "describe this image",
         media: {
-          transport: "jetstream-object-store",
-          bucket: "lucy_media_v2",
-          key: "inbound/demo_user/device/photo.png",
+          transport: "iroh-blob",
+          blob_ref: "blob:inbound_photo",
           kind: "image",
           contentType: "image/png",
           size: 5,
           fileName: "photo.png",
-          sha256: "abc123",
         },
       },
-      deviceId: "2080563661542787073",
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
     });
 
     expect(downloadMediaSpy).toHaveBeenCalled();
@@ -230,7 +234,7 @@ describe("handleLucyInboundMessage", () => {
       expect.objectContaining({
         type: "assistant.final",
         media: expect.objectContaining({
-          key: "outbound/demo_user/device/event/reply.png",
+          blob_ref: "blob:abc123",
           kind: "image",
         }),
       }),
@@ -242,17 +246,14 @@ describe("handleLucyInboundMessage", () => {
       buffer: Buffer.from("%PDF"),
       contentType: "application/pdf",
       fileName: "spec.pdf",
-      kind: "document",
     });
     uploadMediaSpy.mockResolvedValueOnce({
-      transport: "jetstream-object-store",
-      bucket: "lucy_media_v2",
-      key: "outbound/demo_user/device/event/spec.pdf",
+      transport: "iroh-blob",
+      blob_ref: "blob:spec_pdf",
       kind: "document",
       contentType: "application/pdf",
       size: 4,
       fileName: "spec.pdf",
-      sha256: "abc123",
     });
     const { runtime, recordInboundSession, saveMediaBuffer } = createChannelRuntime({
       finalPayload: {
@@ -265,11 +266,12 @@ describe("handleLucyInboundMessage", () => {
       contentType: "application/pdf",
     });
 
+    const session = createMockSession();
     await handleLucyInboundMessage({
       cfg: {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
           },
         },
       } as OpenClawConfig,
@@ -279,17 +281,18 @@ describe("handleLucyInboundMessage", () => {
         version: 2,
         text: "summarize this document",
         media: {
-          transport: "jetstream-object-store",
-          bucket: "lucy_media_v2",
-          key: "inbound/demo_user/device/spec.pdf",
+          transport: "iroh-blob",
+          blob_ref: "blob:inbound_spec",
           kind: "document",
           contentType: "application/pdf",
           size: 4,
           fileName: "spec.pdf",
-          sha256: "abc123",
         },
       },
-      deviceId: "2080563661542787073",
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
     });
 
     expect(saveMediaBuffer).toHaveBeenCalledWith(
@@ -321,6 +324,7 @@ describe("handleLucyInboundMessage", () => {
 
   it("emits an error when payload channelUserKey mismatches the subject namespace", async () => {
     const { runtime } = createChannelRuntime();
+    const session = createMockSession();
     await handleLucyInboundMessage({
       cfg: {} as OpenClawConfig,
       account: createAccount(),
@@ -330,7 +334,10 @@ describe("handleLucyInboundMessage", () => {
         text: "hello",
         channelUserKey: "wrong",
       },
-      deviceId: "2080563661542787073",
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
     });
 
     expect(publishSpy).toHaveBeenCalledWith(
@@ -419,26 +426,35 @@ describe("LucyExecApprovalHandler", () => {
 
     const mockAccount = {
       accountId: "default",
-      channelUserKey: "cuk_demo",
+      userCenterDomain: "user-center.lucy.run",
+      lucyServerDomain: "chat.lucy.run",
+      homeDir: "~/data/lucy_im/",
+      kind: "lucy" as const,
       subjectPrefix: "cephalon.im.npc",
-      mediaBucket: "lucy_media_v2",
-      mediaRetentionHours: 168,
       mediaMaxBytes: 20 * 1024 * 1024,
       enabled: true,
       configured: true,
-      servers: ["nats://127.0.0.1:4222"],
       dmPolicy: "open" as const,
       allowFrom: [],
+    };
+
+    const mockSession = {
+      publishChannel: vi.fn(async () => undefined),
+      subscribeChannel: vi.fn(async () => undefined),
+      accessToken: vi.fn(() => "cuk_demo"),
+      shutdown: vi.fn(async () => undefined),
     };
 
     // Dynamically import after mocks are set so the module cache is clean
     const { LucyExecApprovalHandler } = await import("./exec-approvals-handler.js");
 
     const handler = new LucyExecApprovalHandler(
-      {} as any, // oxlint-disable-line typescript/no-explicit-any
-      mockAccount as any, // oxlint-disable-line typescript/no-explicit-any
+      {} as ConstructorParameters<typeof LucyExecApprovalHandler>[0],
+      mockAccount as unknown as ConstructorParameters<typeof LucyExecApprovalHandler>[1],
       "1234567890123456789",
-      {} as any, // oxlint-disable-line typescript/no-explicit-any
+      mockSession as unknown as ConstructorParameters<typeof LucyExecApprovalHandler>[3],
+      "user_demo",
+      "cuk_demo",
     );
     await handler.start();
 

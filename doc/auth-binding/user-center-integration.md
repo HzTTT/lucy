@@ -1,71 +1,72 @@
-# user-center 落地说明
+# user-center 与 lucy-server 落地说明
 
-本文记录当前 `user-center` 已经落地的这套 Lucy 绑定实现，避免文档和代码再脱节。
+本文记录当前 `user-center` 和 `lucy-server` 已经落地的 Lucy 绑定与鉴权实现。
 
 ## 1. 统一术语
 
-- `channel_device_id`
-  - 插件自己生成、自己持久化的设备长期标识
+- `cdi`（channel_device_id）
+  - 由 `user-center` 在设备注册时根据 Ed25519 公钥生成并返回
 
-- `bootstrap_token`
-  - 插件自己生成、自己持久化的 bootstrap 阶段凭据
-  - 服务端只保存其 hash
-
-- `channel_user_key`
+- `cuk`（channel_user_key）
   - 当前用户在 Lucy channel 下唯一的长期凭据
   - 第一次成功绑定设备时懒创建
 
-## 2. 当前表结构
+- `user_id`
+  - 绑定成功后返回的用户标识
 
-当前 `user-center` 已经新增：
+- Ed25519 公钥
+  - 设备注册时提交的 32 字节原始公钥（标准 Base64 编码）
+  - 后续请求通过该密钥对签名验证身份
 
-- `channel_devices`
-- `channel_user_credentials`
+## 2. 服务划分
 
-设计约束：
+### `user-center` 负责
 
-- `channel_devices(channel, channel_device_id)` 唯一
-- `channel_user_credentials(channel, user_id)` 唯一
-- `channel_user_credentials(channel, channel_user_key)` 唯一
+- 设备注册（接收公钥，返回 `cdi`）
+- 用户登录
+- 设备绑定（用户 ↔ `cdi`）
+- 绑定设备列表查询
+- 用户凭据（`cuk`）查询
+- 模型配置接口（`current-user/model-config`）
 
-## 3. 当前接口
+### `lucy-server` 负责
 
-### `POST /v1/channels/lucy/devices/registrations`
+- pre-bind OTP 签发（Ed25519 签名验证）
+- 设备绑定状态查询（Ed25519 签名验证）
+- NATS token 换取（Ed25519 签名验证）
+
+## 3. `user-center` 接口
+
+### `POST /v1/devices/new`
+
+注册新设备。
 
 请求：
 
 ```json
 {
-  "channel_device_id": "2031655882831360000",
-  "bootstrap_token": "cbt_xxx"
+  "public_key": "Base64 编码的 32 字节 Ed25519 公钥"
 }
 ```
 
-响应：
+响应（`code = 20000` 时）：
 
 ```json
 {
-  "channel": "lucy",
-  "channel_device_id": "2031655882831360000",
-  "binding_status": "pending"
+  "code": 20000,
+  "data": {
+    "cdi": "2031655882831360000"
+  }
 }
 ```
 
-### `PUT /v1/channels/lucy/device-bindings/{channel_device_id}`
+### `PUT /v1/channels/lucy/device-bindings/{cdi}`
 
 说明：
 
 - 依赖用户登录态
-- 第一次成功绑定时会自动创建 `channel_user_key`
+- 第一次成功绑定时会自动创建 `cuk`
 - 同用户重复绑定是幂等的
-
-### `GET /v1/channels/lucy/device-bindings/{channel_device_id}`
-
-说明：
-
-- 插件必须带 `X-Bootstrap-Token`
-- 未绑定时只返回状态
-- 已绑定时返回 `channel_user_key`
 
 ### `GET /v1/channels/lucy/current-user/device-bindings`
 
@@ -114,14 +115,59 @@
 }
 ```
 
-### `POST /v1/channels/lucy/connection-verifications`
+### `GET /v1/channels/lucy/current-user/model-config`
+
+说明：
+
+- 依赖用户登录态
+- 第一次访问时懒创建 Lucy 专用 API key
+
+实际响应包体：
+
+```json
+{
+  "code": 20000,
+  "msg": "操作成功",
+  "data": {
+    "channel": "lucy",
+    "provider_id": "cephalon",
+    "api_key": "sk_xxx",
+    "base_url": "https://test.unicorn.org.cn/cephalon/user-center/v1/model",
+    "default_model_id": "kimi-k2.5",
+    "created": false,
+    "models": [
+      {
+        "id": "kimi-k2.5",
+        "label": "Kimi K2.5",
+        "enabled": true,
+        "is_default": true
+      }
+    ]
+  }
+}
+```
+
+## 4. `lucy-server` 接口
+
+所有 `lucy-server` 接口都需要 Ed25519 签名验证。签名协议：
+
+1. 构造参数 Map（如 `cdi`, `nonce`, `ts` 等）
+2. 按 key ASCII 排序，拼成 `k=v&k=v` 格式
+3. 用 Ed25519 私钥签名，Base64 编码
+4. 将 `sign` 字段加入请求
+
+### `POST /v1/channels/lucy/devices/pre-bind`
+
+签发 OTP。
 
 请求：
 
 ```json
 {
-  "channel_device_id": "2031655882831360000",
-  "channel_user_key": "cuk_xxx"
+  "cdi": "2031655882831360000",
+  "nonce": "randomAlphanumeric16",
+  "ts": "1712700000",
+  "sign": "Base64 Ed25519 签名"
 }
 ```
 
@@ -129,36 +175,67 @@
 
 ```json
 {
-  "ok": true,
-  "user_id": "2032791907809468416",
-  "channel_device_id": "2031655882831360000"
+  "otp": "123456",
+  "expires_in": 300
 }
 ```
 
-## 4. 当前实现约束
+### `GET /v1/channels/lucy/devices/device-bindings`
+
+查询绑定状态。
+
+Query 参数：`cdi`, `nonce`, `ts`, `sign`
+
+响应（已绑定时）：
+
+```json
+{
+  "status": "bound",
+  "cuk": "cuk_xxx",
+  "user_id": "2032791907809468416"
+}
+```
+
+响应（未绑定时）：
+
+```json
+{
+  "status": "pending"
+}
+```
+
+### `POST /v1/channels/lucy/nats/token/npc`
+
+换取 NATS token。
+
+请求：
+
+```json
+{
+  "cdi": "2031655882831360000",
+  "kind": "lucy",
+  "nonce": "randomAlphanumeric16",
+  "ts": 1712700000,
+  "sign": "Base64 Ed25519 签名"
+}
+```
+
+签名参数包含 `cuk`（不在请求体中，但参与签名）。
+
+响应：
+
+```json
+{
+  "token": "nats_token_xxx",
+  "expires_in": 3600,
+  "nats_url": "nats://chat.lucy.run:4222",
+  "access_token": "optional_access_token",
+  "access_token_expires_in": 7200
+}
+```
+
+## 5. 当前实现约束
 
 - `current-user/*` 接口走普通用户 JWT
-- `connection-verifications` 当前没有额外 service-secret 校验
-- 服务启动时如果不带 `--db_migrate`，新表不会自动落库
-
-## 5. 当前测试结论
-
-已经实际验证通过：
-
-- 未登录访问 `current-user/*` 会被拒绝
-- `registrations` 新建设备成功，状态为 `pending`
-- 绑定前 `device-bindings/{channel_device_id}` 不会泄露 `channel_user_key`
-- 登录后绑定成功，状态变成 `bound`
-- 同用户重复绑定幂等
-- `current-user/device-bindings` 能看到绑定设备
-- `current-user/credential` 能拿到唯一的 `channel_user_key`
-- 绑定后插件 bootstrap 能拿到同一个 `channel_user_key`
-- `connection-verifications` 对正确组合返回 `ok=true`
-- `connection-verifications` 对错误 key 返回 `ok=false`
-- 当前真实登录返回中，访问 token 位于 `data.token`
-
-## 6. 一个已知细节
-
-错误的 `bootstrap_token` 当前会返回通用的 `AuthFailed` 文案，也就是“登录状态已失效，请重新登录”。
-
-这个行为在逻辑上是拒绝成功的，但文案语义还不够精确。后续如果要继续打磨，可以把它单独改成更明确的“bootstrap token 无效”。
+- `lucy-server` 接口通过 Ed25519 签名验证设备身份
+- 业务错误大多是 HTTP 200 + `code/msg/data` 包装，客户端不能只看 HTTP 状态码

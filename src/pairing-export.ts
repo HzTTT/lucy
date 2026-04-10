@@ -1,69 +1,72 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { getLucyRuntime } from "./runtime.js";
-import {
-  LucyBindingStatusSchema,
-  LucyMessageIdSchema,
-  type LucyDeviceState,
-} from "./types.js";
+import type { LucyBindingStatus } from "./types.js";
+import { LucyBindingStatusSchema } from "./types.js";
 
 export const LucyPairingExportSchema = z.object({
   version: z.literal(1),
   channel: z.literal("lucy"),
   state: z.literal("ready"),
-  channel_device_id: LucyMessageIdSchema,
+  channel_device_id: z.string().min(1),
   binding_status: LucyBindingStatusSchema,
   created_at_ms: z.number().int().nonnegative(),
 });
 
 export type LucyPairingExport = z.infer<typeof LucyPairingExportSchema>;
 
-function buildLucyPairingExport(state: LucyDeviceState): LucyPairingExport {
-  return {
-    version: 1,
-    channel: "lucy",
-    state: "ready",
-    channel_device_id: state.channelDeviceId,
-    binding_status: state.bindingStatus,
-    created_at_ms: state.createdAtMs,
-  };
+function expandHomeDir(p: string): string {
+  if (p.startsWith("~/")) {
+    return path.join(process.env.HOME ?? "/tmp", p.slice(2));
+  }
+  return p;
 }
 
-export function resolveLucyPairingExportPath(env: NodeJS.ProcessEnv = process.env): string {
-  const stateDir = getLucyRuntime().state.resolveStateDir(env, os.homedir);
-  return path.join(stateDir, "lucy", "pairing-info.json");
+async function readFileOptional(filePath: string): Promise<string | undefined> {
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    return content.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export async function readLucyPairingExport(params?: {
-  env?: NodeJS.ProcessEnv;
-}): Promise<LucyPairingExport | null> {
-  const filePath = resolveLucyPairingExportPath(params?.env);
+export function resolveLucyPairingExportPath(homeDir: string): string {
+  return path.join(expandHomeDir(homeDir), "pairing-info.json");
+}
+
+export async function readLucyPairingExport(homeDir: string): Promise<LucyPairingExport | null> {
+  const filePath = resolveLucyPairingExportPath(homeDir);
   try {
     const raw = await fs.readFile(filePath, "utf8");
     return LucyPairingExportSchema.parse(JSON.parse(raw) as unknown);
-  } catch (err) {
-    const code = (err as { code?: string }).code;
-    if (code === "ENOENT") {
-      return null;
-    }
+  } catch {
     return null;
   }
 }
 
-export async function syncLucyPairingExport(
-  state: LucyDeviceState,
-  params?: { env?: NodeJS.ProcessEnv },
-): Promise<void> {
-  const filePath = resolveLucyPairingExportPath(params?.env);
-  const nextExport = buildLucyPairingExport(state);
-  const existing = await readLucyPairingExport(params);
-  if (existing && JSON.stringify(existing) === JSON.stringify(nextExport)) {
+export async function syncLucyPairingExport(homeDir: string): Promise<void> {
+  const resolvedHome = expandHomeDir(homeDir);
+  const cdi = await readFileOptional(path.join(resolvedHome, "channel_ids", "cdi"));
+  if (!cdi) {
+    // Not initialized yet — skip silently
     return;
   }
 
+  const cuk = await readFileOptional(path.join(resolvedHome, "channel_ids", "cuk"));
+  const bindingStatus: LucyBindingStatus = cuk ? "bound" : "pending";
+
+  const exportData: LucyPairingExport = {
+    version: 1,
+    channel: "lucy",
+    state: "ready",
+    channel_device_id: cdi,
+    binding_status: bindingStatus,
+    created_at_ms: Date.now(),
+  };
+
+  const filePath = resolveLucyPairingExportPath(homeDir);
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  await fs.writeFile(filePath, `${JSON.stringify(nextExport, null, 2)}\n`, "utf8");
+  await fs.writeFile(filePath, `${JSON.stringify(exportData, null, 2)}\n`, "utf8");
   await fs.chmod(filePath, 0o600);
 }

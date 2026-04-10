@@ -2,7 +2,7 @@
 
 ## Scope
 
-This directory is the `lucy` OpenClaw channel plugin: a DM-only transport that bridges OpenClaw to Lucy clients over NATS. It owns transport, binding, presence, and media transfer; it does **not** own model/provider availability.
+This directory is the `lucy` OpenClaw channel plugin: a DM-only transport that bridges OpenClaw to Lucy clients over NATS via `lucy-im-sdk-nodejs`. The SDK owns auth (Ed25519), binding, NATS token exchange, JetStream messaging, and presence. The plugin owns OpenClaw integration, media transfer, and model provisioning; it does **not** own model/provider availability.
 
 When docs and code disagree, treat the current code as the source of truth and update guidance to match the code.
 
@@ -40,79 +40,80 @@ For Lucy work, also inspect `extensions/lucy/outside/`. These linked repos are p
 
 Treat this repository as the **OpenClaw-side Lucy channel integration**, not as the source of truth for user identity or binding state.
 
-- Lucy plugin responsibilities:
-  - generate and persist `channel_device_id` / `bootstrap_token`
-  - register the device, poll binding state, and persist the bound `channel_user_key`
-  - connect OpenClaw to NATS and map inbound/outbound Lucy subjects and media transport
+- Lucy plugin responsibilities (via `lucy-im-sdk-nodejs`):
+  - generate Ed25519 keypair and register device with `user-center` to obtain `cdi`
+  - execute pre-bind OTP flow and poll binding to obtain `cuk` + `user_id`
+  - exchange Ed25519-signed params for NATS token and connect
+  - subscribe/publish via JetStream Pull Consumer (stream `IM_NPC`, durable `npc-<cdi>`)
+  - SDK handles presence internally (`_discover` online/offline, heartbeat, ping reply)
   - export sanitized pairing state for nearby BLE/onboarding flows
   - embed-register the `cephalon` provider inside the Lucy plugin package itself
   - accept `version = 3 / kind = provision_model` control messages
   - write `models.providers.cephalon.*` and switch `agents.defaults.model.primary`
   - trigger automatic `openclaw gateway restart` (or configured restart helper override) after provisioning
 - `user-center` responsibilities:
-  - own device registration, user-device binding, `channel_user_key`, and connection verification truth
+  - accept Ed25519 public key registration, return `cdi`
+  - own user-device binding, `cuk`, and credential lookup
   - expose `GET /v1/channels/lucy/current-user/model-config`
   - lazily create and then reuse the Lucy-specific model API key
+- `lucy-server` responsibilities:
+  - pre-bind OTP signing (Ed25519 signature verification)
+  - device binding status query (Ed25519 signature verification)
+  - NATS token exchange (Ed25519 signature verification)
 - `outside/npc-im-server/auth-callout` responsibilities:
-  - validate `channel_user_key + channel_device_id` with `user-center`
-  - mint minimal NATS permissions for the validated device pair
-- `outside/npc-im-server/presence-bridge` responsibilities:
-  - consume `client.status.report` and NATS disconnect events
-  - broadcast `_discover` online/offline presence
+  - validate NATS token
+  - mint minimal NATS permissions for the validated device
 - `outside/blue-wifi` responsibilities:
   - read Lucy's local pairing export and expose it over BLE
-- iOS / external clients responsibilities:
-  - scan QR or fetch BLE pairing info to obtain `channel_device_id`
+- iOS / external clients responsibilities (via `lucy-im-sdk-kotlin`):
+  - scan QR or fetch BLE pairing info to obtain `cdi`
   - call `user-center` bind/current-user APIs
-  - talk to the same NATS subjects from the client side
+  - connect NATS via their own SDK
 
-Keep terminology aligned with the integration docs: `channel_user_key`, `channel_device_id`, and `bootstrap_token`.
+Keep terminology aligned with the integration docs: `cdi`, `cuk`, `user_id`, and Ed25519 keypair.
 
 ## Project structure and key code
 
-Lucy is a TypeScript ESM OpenClaw channel plugin.
+Lucy is a TypeScript ESM OpenClaw channel plugin. Auth, binding, NATS connection, JetStream messaging, and presence are delegated to `lucy-im-sdk-nodejs` (git submodule at `lucy-im-sdk/`).
 
 - `extensions/lucy/index.ts` — plugin entrypoint
+- `extensions/lucy/lucy-im-sdk/` — git submodule: `lucy-im-sdk-nodejs` (Ed25519 auth, binding, NATS, JetStream, presence)
 - `extensions/lucy/src/channel.ts` — top-level `ChannelPlugin` definition
-- `extensions/lucy/src/gateway.ts` — inbound message pipeline and runtime event mirroring
-- `extensions/lucy/src/send.ts` — machine-event publication
-- `extensions/lucy/src/nats.ts` — NATS connection and subject helpers
-- `extensions/lucy/src/presence.ts` — `client.status.report`, `_discover`, and `ping` behavior
+- `extensions/lucy/src/gateway.ts` — inbound message pipeline and runtime event mirroring (JetStream consumer)
+- `extensions/lucy/src/send.ts` — machine-event publication (JetStream publish)
 - `extensions/lucy/src/media.ts` — JetStream Object Store upload/download
-- `extensions/lucy/src/auth-binding.ts` — registration + binding sync
-- `extensions/lucy/src/user-center.ts` — HTTP calls to `user-center`
-- `extensions/lucy/src/state.ts` — persisted local device state (`device-state.json`)
 - `extensions/lucy/src/pairing-export.ts` — sanitized BLE pairing export (`pairing-info.json`)
 - `extensions/lucy/src/types.ts` — zod schemas and protocol types
 
 ## Startup and binding flow
 
-Gateway startup is binding-first:
+Gateway startup is binding-first, using `lucy-im-sdk-nodejs`:
 
-1. `startLucyGateway()` goes through `syncLucyBindingState()`.
-2. The plugin ensures local device state exists.
-3. It registers the device with `user-center` and polls bind status.
-4. Once bound, it hydrates the account with `channel_user_key`.
-5. It connects NATS and subscribes to `{subjectPrefix}.{channelUserKey}.{channelDeviceId}.client`.
-6. It publishes replies/events to the sibling `.machine` subject.
+1. `startLucyGateway()` creates `LucyImClient` with config (`homeDir`, `userCenterDomain`, `lucyServerDomain`, `kind`).
+2. Calls `client.init()` — SDK generates Ed25519 keypair, registers device (public key → `cdi`), checks local `cuk`/`user_id`.
+3. If `PendingBind`: calls `client.preBind()` for OTP, then `client.pollBinding()` until bound (persists `cuk` + `user_id`).
+4. Calls `client.connect()` — SDK exchanges Ed25519-signed params for NATS token, connects, initializes JetStream, starts presence.
+5. Plugin subscribes via `session.subscribeChannel("cephalon.im.npc.<user_id>.<cdi>", handler)`.
+6. Plugin publishes via `session.publishChannel("cephalon.im.user.<user_id>", payload)`.
 
-The normal production path learns `channelDeviceId`, `bootstrapToken`, and `channelUserKey` dynamically from local state plus `user-center`; do not treat them as static config unless explicitly debugging compatibility.
+SDK stores state in `~/data/lucy_im/` (Ed25519 keys in `bootstrap_token/`, identifiers in `channel_ids/`).
 
 ## Cross-repo change checklist
 
 - Protocol fields or machine events changed:
   - update `extensions/lucy/src/**`
   - verify `outside/LucyIOSDemo/**`
-- Binding semantics or `user-center` API changed:
-  - update `extensions/lucy/src/auth-binding.ts`, `extensions/lucy/src/user-center.ts`
+- Binding semantics or `user-center` / `lucy-server` API changed:
+  - SDK handles auth/binding internally; check `lucy-im-sdk/src/http.ts`, `lucy-im-sdk/src/client.ts`
   - verify `outside/user-center/**`
 - Model provisioning / auto-restart / embedded `cephalon` provider changed:
   - update `extensions/lucy/src/cephalon-provider.ts`, `extensions/lucy/src/provider-provisioning.ts`, `extensions/lucy/src/restart-ticket.ts`, `extensions/lucy/src/gateway.ts`, `extensions/lucy/src/types.ts`
   - verify `outside/user-center/internal/{routers,controllers,handlers,types}/channel_binding.go`
   - verify `outside/LucyIOSDemo/LucyIOSDemoPackage/Sources/LucyIOSDemoFeature/{LucyModels,LucyServices,LucyRootView,LucySettingsSheetView,LucyRedesignedRootScene}.swift`
   - update docs in all three repos together so provider id, model id, event names, restart behavior, and `base_url` semantics stay aligned
-- Presence / `_discover` / `ping` / `client.status.report` / NATS auth changed:
-  - update `extensions/lucy/src/presence.ts`, `extensions/lucy/src/gateway.ts`, `extensions/lucy/src/nats.ts`
+- Presence / `_discover` / heartbeat / NATS auth changed:
+  - Presence is handled by SDK internally (`lucy-im-sdk/src/natsConn.ts`)
+  - NATS auth is token-based via SDK (`lucy-im-sdk/src/http.ts` `fetchNatsTokenNpc`)
   - verify `outside/npc-im-server/**`
 - Pairing export changed:
   - update `extensions/lucy/src/pairing-export.ts`
@@ -164,7 +165,7 @@ Use a boundary-first workflow. Prove the cheapest layer first, then move outward
 
 2. Bring up the smallest useful stack.
 - Start NATS and the gateway first.
-- Keep config/workspace dirs stable so `deviceId` and bind state do not drift.
+- Keep SDK homeDir (`~/data/lucy_im/`) stable so `cdi` and bind state do not drift.
 
 3. Separate plugin failure from framework/config failure.
 - Read gateway logs before changing code.
@@ -177,7 +178,7 @@ Use a boundary-first workflow. Prove the cheapest layer first, then move outward
 - If logs show `Cannot find module 'nats'`, inspect both `/app/extensions/lucy/node_modules` and `/app/node_modules`.
 
 5. Verify transport before model auth.
-- `inbound.accepted` means NATS subjects, channel routing, and inbound dispatch are working.
+- `inbound.accepted` means JetStream consumer, channel routing, and inbound dispatch are working.
 - `assistant.start` / `assistant.partial` means model execution started.
 - `assistant.final` with upstream auth text or HTTP 401 means Lucy transport is healthy and provider config is the blocker.
 
@@ -194,7 +195,7 @@ Use a boundary-first workflow. Prove the cheapest layer first, then move outward
 - `Cannot find module 'nats'`:
   runtime packaging problem, not a TypeScript problem.
 - No `inbound.accepted`:
-  subject mapping, NATS reachability, or channel startup is broken.
+  JetStream consumer setup, NATS token exchange, or channel startup is broken.
 - `inbound.accepted` appears but no assistant events:
   transport is alive; inspect model execution or upstream runtime state.
 - `assistant.final` returns auth or provider errors:
@@ -212,7 +213,7 @@ Vitest is the test framework. Keep tests as `*.test.ts` beside the code they cov
 
 ## Security and configuration tips
 
-Never commit real `channel_user_key`, NATS credentials, generated `channelDeviceId`, or `bootstrapToken` values. Use placeholders that still satisfy the runtime format rules because these values are used in subjects, auth, and protocol payloads.
+Never commit real `cuk`, `cdi`, NATS tokens, Ed25519 private keys, or `user_id` values. Use placeholders that still satisfy the runtime format rules because these values are used in subjects, auth, and protocol payloads.
 
 Keep runtime packages in `dependencies`; keep `openclaw` in `devDependencies` or `peerDependencies` only so plugin installs remain compatible with the host loader.
 

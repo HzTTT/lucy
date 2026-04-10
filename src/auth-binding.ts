@@ -1,125 +1,77 @@
-import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
-import { loadOrCreateLucyDeviceState, writeLucyDeviceState } from "./state.js";
-import type { LucyDeviceState, ResolvedLucyAccount } from "./types.js";
-import { fetchLucyDeviceBinding, mergeLucyBindingIntoState, registerLucyDevice } from "./user-center.js";
+import { LucyImClient, type LucyImConfig } from "lucy-im-sdk";
+import type { ConnectedClient } from "lucy-im-sdk";
 
-const LUCY_BINDING_POLL_INITIAL_MS = 3_000;
-const LUCY_BINDING_POLL_MAX_MS = 30_000;
-const LUCY_STARTUP_HTTP_TIMEOUT_MS = 5_000;
-
-function didLucyBindingStateChange(current: LucyDeviceState, next: LucyDeviceState): boolean {
-  return JSON.stringify(current) !== JSON.stringify(next);
-}
-
-async function sleepWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw new Error("Lucy binding aborted");
-  }
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, delayMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new Error("Lucy binding aborted"));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-export function hydrateLucyAccountFromState(
-  account: ResolvedLucyAccount,
-  state: LucyDeviceState,
-): ResolvedLucyAccount {
-  return {
-    ...account,
-    channelDeviceId: state.channelDeviceId,
-    bootstrapToken: state.bootstrapToken,
-    channelUserKey: state.channelUserKey ?? account.channelUserKey,
-  };
-}
-
-export async function ensureLucyBootstrapState(account: ResolvedLucyAccount): Promise<LucyDeviceState> {
-  return await loadOrCreateLucyDeviceState({
-    overrides: {
-      channelDeviceId: account.channelDeviceId,
-      bootstrapToken: account.bootstrapToken,
-      channelUserKey: account.channelUserKey,
-    },
-  });
-}
-
-export async function syncLucyBindingState(params: {
-  account: ResolvedLucyAccount;
+export async function syncLucyBindingWithSdk(params: {
+  cfg: LucyImConfig;
   signal?: AbortSignal;
-  log?: Pick<NonNullable<ChannelGatewayContext<ResolvedLucyAccount>["log"]>, "info" | "warn" | "error">;
+  log?: {
+    info?: (msg: string) => void;
+    warn?: (msg: string) => void;
+    error?: (msg: string) => void;
+  };
   waitForBinding: boolean;
-}): Promise<LucyDeviceState> {
-  let state = await ensureLucyBootstrapState(params.account);
-  if (state.channelUserKey) {
-    return state;
+}): Promise<{ cdi: string; userId: string; cuk: string }> {
+  const client = new LucyImClient(params.cfg);
+  const init = await client.init();
+
+  if (init.kind === "Ready") {
+    const identity = await client.deviceIdentity();
+    if (!identity.user_id) {
+      throw new Error("Lucy device ready but no user_id");
+    }
+    // cuk comes from connect; return empty string here — caller must connect before sending
+    return { cdi: identity.cdi, userId: identity.user_id, cuk: "" };
   }
 
-  let pollDelayMs = LUCY_BINDING_POLL_INITIAL_MS;
+  // PendingBind
+  if (!params.waitForBinding) {
+    throw new Error("Lucy device not bound and waitForBinding=false");
+  }
 
-  while (true) {
+  const otp = await client.preBind();
+  params.log?.info?.(`[lucy] Binding OTP: ${otp.otp} (expires in ${otp.expires_in}s)`);
+
+  const deadline = Date.now() + otp.expires_in * 1000;
+  while (Date.now() < deadline) {
     if (params.signal?.aborted) {
       throw new Error("Lucy binding aborted");
     }
 
-    try {
-      const registration = await registerLucyDevice({
-        channelDeviceId: state.channelDeviceId,
-        bootstrapToken: state.bootstrapToken,
-        signal: params.signal,
-        timeoutMs: LUCY_STARTUP_HTTP_TIMEOUT_MS,
-      });
-      // Mark as registered so iOS knows the device is known to user-center.
-      // registration_status from the server is always "pending" here (registration,
-      // not binding), so we promote the local state to "registered" unconditionally.
-      const mergedRegistration = mergeLucyBindingIntoState(state, registration);
-      const registeredState: LucyDeviceState = {
-        ...mergedRegistration,
-        bindingStatus:
-          mergedRegistration.bindingStatus === "bound" ? "bound" :
-          state.bindingStatus === "bound" ? "bound" :
-          "registered",
+    const bound = await client.pollBinding();
+    if (bound) {
+      return { cdi: init.cdi, userId: bound.user_id, cuk: bound.cuk };
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        params.signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, 2000);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new Error("Lucy binding aborted"));
       };
-      if (didLucyBindingStateChange(state, registeredState)) {
-        await writeLucyDeviceState(registeredState);
-        state = registeredState;
-      }
-
-      const binding = await fetchLucyDeviceBinding({
-        channelDeviceId: state.channelDeviceId,
-        bootstrapToken: state.bootstrapToken,
-        signal: params.signal,
-        timeoutMs: LUCY_STARTUP_HTTP_TIMEOUT_MS,
-      });
-      const nextState = mergeLucyBindingIntoState(state, binding);
-      if (didLucyBindingStateChange(state, nextState)) {
-        await writeLucyDeviceState(nextState);
-        state = nextState;
-      }
-      if (state.channelUserKey) {
-        return state;
-      }
-
-      // Reset backoff after a successful round-trip.
-      pollDelayMs = LUCY_BINDING_POLL_INITIAL_MS;
-    } catch (err) {
-      params.log?.warn?.(`[lucy] user-center binding sync failed: ${String(err)}`);
-      if (!params.waitForBinding) {
-        throw err;
-      }
-      // Exponential backoff: 3s -> 6s -> 12s -> 30s cap.
-      pollDelayMs = Math.min(pollDelayMs * 2, LUCY_BINDING_POLL_MAX_MS);
-    }
-
-    if (!params.waitForBinding) {
-      return state;
-    }
-    await sleepWithAbort(pollDelayMs, params.signal);
+      params.signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
+
+  throw new Error("Lucy binding timed out");
+}
+
+export async function connectLucySdk(params: {
+  cfg: LucyImConfig;
+}): Promise<{ client: ConnectedClient; cdi: string; userId: string; cuk: string }> {
+  const imClient = new LucyImClient(params.cfg);
+  const result = await imClient.connect();
+  if (result.kind === "PendingBind") {
+    throw new Error("Lucy not bound");
+  }
+  const identity = await imClient.deviceIdentity();
+  const cuk = result.client.accessToken() ?? "";
+  return {
+    client: result.client,
+    cdi: identity.cdi,
+    userId: identity.user_id!,
+    cuk,
+  };
 }

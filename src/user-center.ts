@@ -1,5 +1,11 @@
-import type { LucyBindingStatus, LucyDeviceState } from "./types.js";
-import { LUCY_USER_CENTER_BASE_URL } from "./types.js";
+import type { LucyBindingStatus } from "./types.js";
+
+const LUCY_USER_CENTER_BASE_URL = "https://user-center.lucy.run";
+
+type LucyDeviceState = {
+  channelUserKey?: string;
+  bindingStatus: LucyBindingStatus;
+};
 
 const DEFAULT_HTTP_TIMEOUT_MS = 10_000;
 

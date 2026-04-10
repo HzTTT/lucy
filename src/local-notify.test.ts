@@ -14,8 +14,8 @@ vi.mock("./send.js", () => ({
       eventId: "2080563661542787072",
       type: params.type,
       timestamp: Date.now(),
-      channelUserKey: params.account.channelUserKey ?? "",
-      channelDeviceId: params.deviceId ?? "2080563661542787073",
+      channelUserKey: params.cuk ?? "",
+      channelDeviceId: params.cdi ?? "2080563661542787073",
       text: params.text,
       metadata: params.metadata,
     };
@@ -27,15 +27,23 @@ function createAccount() {
     accountId: "default",
     enabled: true,
     configured: true,
-    channelUserKey: "cuk_demo_user",
-    channelDeviceId: "2080563661542787073",
-    servers: ["nats://127.0.0.1:4222"],
+    userCenterDomain: "user-center.lucy.run",
+    lucyServerDomain: "chat.lucy.run",
+    homeDir: "~/data/lucy_im/",
+    kind: "lucy" as const,
     subjectPrefix: "cephalon.im.npc",
     dmPolicy: "allowlist" as const,
     allowFrom: ["cuk_demo_user"],
-    mediaBucket: "lucy_media_v2",
-    mediaRetentionHours: 168,
     mediaMaxBytes: 20 * 1024 * 1024,
+  };
+}
+
+function createMockSession() {
+  return {
+    publishChannel: vi.fn(async () => undefined),
+    subscribeChannel: vi.fn(async () => undefined),
+    accessToken: vi.fn(() => "cuk_demo_user"),
+    shutdown: vi.fn(async () => undefined),
   };
 }
 
@@ -63,8 +71,10 @@ describe("Lucy local notify server", () => {
   it("accepts POST JSON and publishes a proactive assistant.final event", async () => {
     const server = await startLucyLocalNotifyServer({
       account: createAccount(),
-      connection: {} as never,
-      deviceId: "2080563661542787073",
+      session: createMockSession() as never,
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
       notify: {
         enabled: true,
         bind: "127.0.0.1",
@@ -107,8 +117,10 @@ describe("Lucy local notify server", () => {
   it("rejects unsupported methods", async () => {
     const server = await startLucyLocalNotifyServer({
       account: createAccount(),
-      connection: {} as never,
-      deviceId: "2080563661542787073",
+      session: createMockSession() as never,
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
       notify: {
         enabled: true,
         bind: "127.0.0.1",
@@ -128,8 +140,10 @@ describe("Lucy local notify server", () => {
   it("rejects invalid payloads without publishing events", async () => {
     const server = await startLucyLocalNotifyServer({
       account: createAccount(),
-      connection: {} as never,
-      deviceId: "2080563661542787073",
+      session: createMockSession() as never,
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
       notify: {
         enabled: true,
         bind: "127.0.0.1",

@@ -1,5 +1,5 @@
 import http from "node:http";
-import type { NatsConnection } from "nats";
+import type { ConnectedClient } from "lucy-im-sdk";
 import { publishLucyMachineEvent } from "./send.js";
 import {
   LucyLocalNotifyPayloadSchema,
@@ -33,8 +33,10 @@ type LucyLocalNotifyLog = {
 
 type StartLucyLocalNotifyServerParams = {
   account: ResolvedLucyAccount;
-  connection: NatsConnection;
-  deviceId: string;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
   notify: NonNullable<ResolvedLucyAccount["localNotify"]>;
   log?: LucyLocalNotifyLog;
 };
@@ -67,7 +69,7 @@ async function readRequestJson(req: http.IncomingMessage): Promise<unknown> {
   let totalBytes = 0;
 
   for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
     totalBytes += buffer.byteLength;
     if (totalBytes > LOCAL_NOTIFY_MAX_BYTES) {
       throw new Error("payload too large");
@@ -138,9 +140,10 @@ async function handleLucyLocalNotifyRequest(
 
   try {
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "assistant.final",
       text: buildLucyLocalNotifyText(payload),
       metadata: {

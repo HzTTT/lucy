@@ -1,0 +1,3 @@
+[submodule "lucy-im-sdk"]
+	path = lucy-im-sdk
+	url = https://git.unicorn.org.cn/aiden/lucy-im-sdk-nodejs.git

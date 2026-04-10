@@ -8,6 +8,18 @@ Lucy 是 OpenClaw 的 Lucy Channel 插件，用来把 OpenClaw Gateway 接到 Lu
 
 Lucy 需要 OpenClaw `2026.3.23` 及以上版本。低于这个版本的 OpenClaw 不支持当前的插件安装方式和 `openclaw lucy ...` 命令。
 
+## 依赖
+
+Lucy 使用 `lucy-im-sdk-nodejs`（git submodule `lucy-im-sdk/`）处理：
+
+- Ed25519 密钥对管理
+- 设备注册与绑定
+- NATS token 换取与连接
+- JetStream 消息收发
+- Presence（上下线、heartbeat、ping）
+
+SDK 工作目录默认为 `~/data/lucy_im/`，存放密钥对和绑定标识。
+
 ## 最小接入
 
 最小接入流程请直接按下面三条命令执行，不要改成其他安装方式：
@@ -30,16 +42,18 @@ openclaw lucy auth-qrcode
 
 当前 Lucy 链路分成两层：
 
-1. **绑定 / 传输层**
-   - 设备 bootstrap
-   - user-center 绑定
-   - NATS 连接与消息收发
+1. **鉴权 / 绑定 / 传输层**（由 `lucy-im-sdk` 处理）
+   - Ed25519 密钥对生成与管理
+   - 设备注册（公钥 → `cdi`）
+   - pre-bind OTP + 绑定轮询（→ `cuk` + `user_id`）
+   - Ed25519 签名换取 NATS token
+   - JetStream 消息收发
+   - Presence 自动管理
 2. **模型配置下发层**
    - Lucy App 通过 user-center 的 Lucy 专属接口获取 `provider + api_key + base_url + models[]`
-   - App 通过 `client` subject 向 Lucy 设备下发 `version = 3 / kind = provision_model`
+   - App 通过 JetStream 向 Lucy 设备下发 `version = 3 / kind = provision_model`
    - Lucy 写入 OpenClaw 的 `models.providers.cephalon.*` 与 `agents.defaults.model.primary`
    - Lucy 自动执行 `openclaw gateway restart`
-   - App 通过 machine event 与 `_discover` presence 感知“正在重启 / 即将上线 / 已恢复”
 
 ## 接入流程说明
 
@@ -98,11 +112,12 @@ daemon 侧把：
 
 如果你把 `localNotify.port` 或 `localNotify.path` 改成别的值，daemon 侧的 `notify.url` 也必须同步调整；Lucy 不会帮你做端口映射或 URL 兼容。
 
-Lucy 会自动处理以下状态，不需要手工写入：
+Lucy 会通过 SDK 自动处理以下状态，不需要手工写入：
 
-- `channel_device_id`
-- `bootstrap_token`
-- `channel_user_key`
+- Ed25519 密钥对（`~/data/lucy_im/bootstrap_token/`）
+- `cdi`（`~/data/lucy_im/channel_ids/cdi`）
+- `cuk`（`~/data/lucy_im/channel_ids/cuk`）
+- `user_id`（`~/data/lucy_im/channel_ids/user_id`）
 
 当 App 下发模型配置时，Lucy 还会自动写入：
 
@@ -167,7 +182,6 @@ Lucy 收到 `provision_model` 控制消息后会：
 - 自动重启前后，App 预期会看到：
   - `config.updated`
   - `restart.scheduled`
-  - `_discover` offline / online
   - `restart.completed`
 
 ## 本地 USB 通知入口
@@ -210,7 +224,7 @@ Lucy 收到 `provision_model` 控制消息后会：
 - `localNotifyTimestamp`
 - `localNotifyMessage`
 
-这里必须保持“扁平字符串字典”。当前 iOS `LucyMachineEvent.metadata` 解码类型仍是 `[String: String]?`，如果再改回嵌套对象，App 会在 machine event 解码阶段直接失败。
+这里必须保持"扁平字符串字典"。当前 iOS `LucyMachineEvent.metadata` 解码类型仍是 `[String: String]?`，如果再改回嵌套对象，App 会在 machine event 解码阶段直接失败。
 
 ## 验证接入
 

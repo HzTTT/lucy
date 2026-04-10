@@ -1,12 +1,12 @@
 # Lucy App / SDK 侧 NATS 接入指南
 
-本文只描述 App / SDK 直接接入 Lucy 时的对外协议边界。  
+本文只描述 App / SDK 直接接入 Lucy 时的对外协议边界。
 如果这里与历史 demo、旧截图或调查记录冲突，以本文和当前代码为准。
 
 权威边界是：
 
-- `client` subject 上的入站 JSON
-- `machine` subject 上的 Lucy machine events
+- JetStream 上的入站 JSON（NPC 侧订阅）
+- JetStream 上的 Lucy machine events（NPC 侧发布）
 - JetStream Object Store 中的媒体对象
 
 不要把 OpenClaw 内部 session transcript、模型 provider 原始响应或历史 debug 日志当成对外协议。
@@ -16,28 +16,30 @@
 在 App 接入前，Lucy 所在的 OpenClaw 必须已经：
 
 1. 安装并启用 Lucy 插件
-2. 完成设备 bootstrap
-3. 通过 `user-center` 完成绑定
-4. 拿到绑定后的：
-   - `channel_user_key`
-   - `channel_device_id`
-5. 成功连接 NATS
-6. 如需自动切换模型，当前用户还应能访问：
+2. SDK 完成设备初始化（Ed25519 密钥对 + 设备注册获得 `cdi`）
+3. 完成绑定（获得 `cuk` 和 `user_id`）
+4. 通过 SDK 换取 NATS token 并成功连接
+5. 如需自动切换模型，当前用户还应能访问：
    - `GET /v1/channels/lucy/current-user/model-config`
 
-当前推荐流程不是手工配置固定 `demo_user`，而是：
+当前推荐流程：
 
 - App 登录 `user-center`
 - App 获取当前用户绑定设备列表
-- App 获取当前用户自己的 `channel_user_key`
-- App 用 `channel_user_key + channel_device_id` 连接 NATS
+- App 获取当前用户自己的 `cuk`
+- App 通过自己的 SDK（`lucy-im-sdk-kotlin`）连接 NATS
 
 ## 2. 凭据来源
 
-对 NATS 来说：
+NATS 连接不再使用 username/password。
 
-- `username = channel_user_key`
-- `password = channel_device_id`
+NPC 侧（本插件）通过 `lucy-im-sdk-nodejs` 的 Ed25519 签名向 `lucy-server` 换取 NATS token：
+
+- `POST /v1/channels/lucy/nats/token/npc`
+- 签名参数：`cdi`, `kind`, `nonce`, `ts`, `cuk`
+- 返回：`token`, `nats_url`, `access_token`
+
+App 侧通过 `lucy-im-sdk-kotlin` 获取自己的 NATS 凭据（IM_USER JetStream，协议与 NPC 侧不同）。
 
 推荐的 App 侧取数方式：
 
@@ -115,13 +117,9 @@
 
 ## 3. 连接方式
 
-Lucy 代码支持：
+SDK 从 `lucy-server` 的 token 响应中获取 `nats_url`，直接使用该地址连接。
 
-- 原生 NATS/TLS：`nats://`、`tls://`
-- NATS over WebSocket：`ws://`、`wss://`
-
-要用哪一种，取决于服务端实际开放的入口。  
-当前已验证的部署使用的是：
+当前已验证的部署：
 
 ```text
 nats://chat.lucy.run:4222
@@ -129,73 +127,63 @@ nats://chat.lucy.run:4222
 
 ## 4. Subject 约定
 
-Lucy 使用以下 NATS subjects：
+Lucy 使用 JetStream 进行消息收发。Subject 由业务与后端约定，SDK 不自动生成。
 
-### 消息通道
+### 消息通道（JetStream）
 
-```text
-client  = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.client
-machine = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.machine
-```
-
-### Presence（设备在线状态）
+NPC 侧：
 
 ```text
-discover = {subjectPrefix}.{channelUserKey}._discover
-ping     = {subjectPrefix}.{channelUserKey}.{channelDeviceId}.ping
+subscribe = cephalon.im.npc.<user_id>.<cdi>
+publish   = cephalon.im.user.<user_id>
 ```
 
-默认 `subjectPrefix`：
+JetStream 配置：
 
-```text
-cephalon.im.npc
-```
+- Stream: `IM_NPC`（`kind=lucy`），`IM_NAS`（`kind=nas`）
+- Durable consumer: `npc-<cdi>`（`kind=lucy`），`nas-<cdi>`（`kind=nas`）
+- Ack policy: Explicit，ack_wait = 180s
+- Deliver policy: StartTime（UTC now - 24h）
+- Replay policy: Instant
 
 方向约定：
 
-- App -> Lucy：向 `client` subject 发布入站 JSON
-- Lucy -> App：订阅 `machine` subject 接收生命周期事件
-- Lucy -> App：设备连接 NATS 后，向 `_discover` 发布 `online\n{channelDeviceId}`，每 30s 重复；关闭时发 `offline\n{channelDeviceId}`
-- App -> Lucy：向 `ping` subject 发布任意内容，设备立即回复一次 `online` 到 `_discover`（用于首次快速探测）
-- 异常断线：presence-bridge 通过 `$SYS.ACCOUNT` 检测到设备断开，自动向 `_discover` 发布 `offline`
+- App -> Lucy：向 NPC subscribe subject 对应的 JetStream stream 发布入站 JSON
+- Lucy -> App：向 publish subject 发布 machine events
 
-### Presence 消息格式
+### Presence（SDK 内部处理）
 
-`_discover` subject 上的消息为 UTF-8 纯文本，两行：
+Presence 由 `lucy-im-sdk` 内部自动管理，应用层不需要额外处理：
 
-```text
-online
-2034248517330624512
-```
+- SDK 连接后自动向 `cephalon.im.npc.<user_id>._discover` 发布 online
+- SDK 自动 30 分钟心跳到 `client.status.report`
+- SDK 自动响应 `_discover` 上的 `cmd: "ping"` 请求
+- SDK 关闭时自动发布 offline
 
-第一行：`online` 或 `offline`  
-第二行：`channelDeviceId`
-
-### Presence 注册（设备端 → presence-bridge）
-
-设备连接 NATS 后向 `client.status.report` 发布一次注册：
+Presence 消息格式（JSON）：
 
 ```json
 {
-  "client_id": 42,
-  "apikey": "cuk_xxx",
-  "npc_id": "2034248517330624512"
+  "cmd": "report",
+  "report": {
+    "status": "online",
+    "cdi": "2034248517330624512"
+  }
 }
 ```
 
-其中 `client_id` 来自 `connection.info.client_id`。这让 presence-bridge 能在异常断线时通过 `$SYS.ACCOUNT` disconnect 事件找到对应设备并广播 offline。
+Heartbeat 消息格式（发到 `client.status.report`）：
 
-### App 端建议
-
-1. App 连接 NATS 后订阅 `_discover` subject
-2. 立即向 `ping` subject 发一次消息触发即时 online 响应
-3. 收到 `online` 时标记设备在线，重置 45s 超时计时器
-4. 收到 `offline` 或 45s 无心跳时标记设备离线
-
-### TODO
-
-- TODO(2026-03-23): 校正多设备账号下的在线态语义。当前 `_discover` 是按 `channelUserKey` 共享的 presence 频道，同一账号绑定多台 `channelDeviceId` 时，App 在线 UI 需要按 `channelDeviceId` 分设备跟踪，不能只按单一用户态显示。
-- TODO(2026-03-23): 复查 OpenClaw 设备在多设备场景下的 `_discover` 心跳可见性。已观察到同账号下另一台设备会稳定广播 `online`, 但 OpenClaw 设备是否总能被 App 正确识别仍需单独验证与修复。
+```json
+{
+  "cmd": "heartbeat",
+  "heartbeat": {
+    "client_id": "42",
+    "cdi": "2034248517330624512",
+    "user_id": "2032791907809468416"
+  }
+}
+```
 
 ## 5. App -> Lucy：入站消息协议
 
@@ -214,9 +202,7 @@ online
   "timestamp": 1773582494346,
   "metadata": {
     "platform": "ios"
-  },
-  "channelUserKey": "cuk_demo_user",
-  "channelDeviceId": "2031655882831360000"
+  }
 }
 ```
 
@@ -251,20 +237,8 @@ online
 | `media` | `object` | 条件必填 | 单个媒体 descriptor |
 | `timestamp` | `number` | 否 | 毫秒时间戳 |
 | `metadata` | `Record<string, unknown>` | 否 | 辅助观测信息 |
-| `channelUserKey` | `string` | 否 | 如果传递，必须与 subject 命名空间一致 |
-| `channelDeviceId` | `string` | 否 | 如果传递，必须与 subject 命名空间一致 |
 
-### 兼容别名
-
-Lucy 当前代码仍兼容这些旧字段：
-
-- `apiKey`
-- `deviceId`
-
-但新接入端应优先发送：
-
-- `channelUserKey`
-- `channelDeviceId`
+注意：入站消息中不再需要 `channelUserKey` / `channelDeviceId` 字段，因为 subject 本身已经包含了路由信息。
 
 ### 模型配置下发消息示例
 
@@ -274,8 +248,6 @@ Lucy 当前代码仍兼容这些旧字段：
   "kind": "provision_model",
   "messageId": "1773582494346106547",
   "timestamp": 1773582494348,
-  "channelUserKey": "cuk_demo_user",
-  "channelDeviceId": "2031655882831360000",
   "metadata": {
     "platform": "ios"
   },
@@ -311,9 +283,7 @@ Lucy 当前代码仍兼容这些旧字段：
 
 1. `config.updated`
 2. `restart.scheduled`
-3. `_discover` offline
-4. `_discover` online
-5. `restart.completed`
+3. `restart.completed`
 
 ### 当前真实事件样例
 
@@ -323,8 +293,8 @@ Lucy 当前代码仍兼容这些旧字段：
   "eventId": "2033178474344333312",
   "type": "assistant.final",
   "timestamp": 1773582497570,
-  "channelUserKey": "cuk_demo_user",
-  "channelDeviceId": "2033138771050475520",
+  "channel_user_key": "cuk_demo_user",
+  "channel_device_id": "2033138771050475520",
   "sourceMessageId": "1773582494346106545",
   "runId": "4f3ae523-b2d9-424f-bdd9-308c5eb75635",
   "sessionKey": "agent:main:main",
@@ -340,8 +310,8 @@ Lucy 当前代码仍兼容这些旧字段：
 | `eventId` | 是 | 事件唯一 id |
 | `type` | 是 | 见下方事件类型 |
 | `timestamp` | 是 | 毫秒时间戳 |
-| `channelUserKey` | 是 | 当前命名空间 |
-| `channelDeviceId` | 是 | 当前设备 id |
+| `channel_user_key` | 是 | 当前用户标识 |
+| `channel_device_id` | 是 | 当前设备 cdi |
 | `sourceMessageId` | 否 | 对应哪条用户输入 |
 | `runId` | 否 | 同一轮执行内部 run 标识 |
 | `sessionKey` | 否 | OpenClaw session key |
@@ -354,10 +324,10 @@ Lucy 当前代码仍兼容这些旧字段：
 
 Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId` 的 `assistant.final`。当前已使用的场景包括：
 
-- `message` 工具主动向 `lucy:<channel_user_key>` 推送内容
+- `message` 工具主动推送内容
 - 本地 `channels.lucy.localNotify` HTTP 入口接收到系统通知
 
-客户端应把这类事件当成“主动消息”处理，而不是强依赖它一定能关联到一条用户输入。
+客户端应把这类事件当成"主动消息"处理，而不是强依赖它一定能关联到一条用户输入。
 
 ### 事件类型
 
@@ -370,25 +340,12 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 - `tool.start`
 - `tool.end`
 - `error`
+- `approval.pending`
+- `approval.resolved`
 - `config.updated`
 - `config.error`
 - `restart.scheduled`
 - `restart.completed`
-
-### iOS / Swift 客户端必须兼容的字段名
-
-线上 machine event 当前发送的是：
-
-- `channelUserKey`
-- `channelDeviceId`
-
-客户端不能只认：
-
-- `channelDeviceID`
-- `channel_device_id`
-- `deviceId`
-
-否则会直接解码失败。
 
 ### 自动重启语义
 
@@ -402,10 +359,10 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 6. 发 `restart.scheduled`
 7. 自动执行 `openclaw gateway restart`
 
-因此 App 不应把 `restart.scheduled` 理解为“请用户手动点击重启”，而应把它理解为：
+因此 App 不应把 `restart.scheduled` 理解为"请用户手动点击重启"，而应把它理解为：
 
-- “设备已接收配置，正在自动重启”
-- 随后等待 `_discover` offline / online 与 `restart.completed`
+- "设备已接收配置，正在自动重启"
+- 随后等待 `restart.completed`
 
 ## 6.1 Lucy 本地通知 HTTP 入口
 
@@ -466,7 +423,7 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 
 ## 7. 媒体上传 / 下载
 
-Lucy 不在 `client` 消息中携带媒体字节本体。正确顺序是：
+Lucy 不在入站消息中携带媒体字节本体。正确顺序是：
 
 1. App 先把文件上传到 JetStream Object Store
 2. App 在入站 JSON 的 `media` 字段里携带 descriptor
@@ -490,7 +447,7 @@ descriptor 定义：
 排障时按边界判断：
 
 - 有 `inbound.accepted`
-  - 说明 NATS subject、Lucy listener、OpenClaw 路由已经打通
+  - 说明 JetStream consumer、Lucy listener、OpenClaw 路由已经打通
 - 有 `assistant.start`
   - 说明模型执行已经开始
 - 有 `assistant.final`
@@ -500,5 +457,7 @@ descriptor 定义：
 
 ## 9. 历史字段说明
 
-旧的 `apiKey/deviceId/version=1` 文档样本已经从当前正文档里移除。  
-如果你还在兼容历史客户端，只把这些字段当成兼容输入，不要再把它们当成新的接入示例。
+旧的 `apiKey/deviceId/version=1` 文档样本已经从当前正文档里移除。
+旧的 Core NATS `client/machine` subject 模式、`username=channelUserKey / password=channelDeviceId` 认证、纯文本 presence 格式均已废弃。
+
+当前所有消息收发使用 JetStream，NATS 认证使用 Ed25519 签名换取的 token。

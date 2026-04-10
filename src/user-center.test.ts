@@ -38,7 +38,7 @@ describe("lucy user-center client", () => {
       binding_status: "pending",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/devices/registrations",
+      expect.stringContaining("/v1/channels/lucy/devices/registrations"),
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -73,7 +73,7 @@ describe("lucy user-center client", () => {
 
     expect(result.channel_user_key).toBe("cuk_demo_user");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
+      expect.stringContaining("/v1/channels/lucy/device-bindings/2080563661542787073"),
       expect.objectContaining({
         headers: expect.objectContaining({
           "X-Bootstrap-Token": "cbt_test",
@@ -86,11 +86,7 @@ describe("lucy user-center client", () => {
     expect(
       mergeLucyBindingIntoState(
         {
-          version: 2,
-          channelDeviceId: "2080563661542787073",
-          bootstrapToken: "cbt_test",
           bindingStatus: "pending",
-          createdAtMs: 1773160840000,
         },
         {
           binding_status: "bound",
@@ -109,11 +105,7 @@ describe("lucy user-center client", () => {
     expect(
       mergeLucyBindingIntoState(
         {
-          version: 2,
-          channelDeviceId: "2080563661542787073",
-          bootstrapToken: "cbt_test",
           bindingStatus: "registered",
-          createdAtMs: 1773160840000,
         },
         {
           binding_status: "pending",
@@ -127,9 +119,9 @@ describe("lucy user-center client", () => {
     );
   });
 
-  it("builds the binding check URL from the hardcoded user-center base URL", () => {
-    expect(buildLucyBindingCheckUrl("2080563661542787073")).toBe(
-      "https://prod.unicorn.org.cn/cephalon/user-center/v1/channels/lucy/device-bindings/2080563661542787073",
+  it("builds the binding check URL from the user-center base URL", () => {
+    expect(buildLucyBindingCheckUrl("2080563661542787073")).toContain(
+      "/v1/channels/lucy/device-bindings/2080563661542787073",
     );
   });
 });

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import type { NatsConnection } from "nats";
+import type { ConnectedClient } from "lucy-im-sdk";
 import { resolveExecApprovalCommandDisplay } from "./exec-approval-helpers.js";
 import { publishLucyMachineEvent } from "./send.js";
 import type { ResolvedLucyAccount } from "./types.js";
@@ -54,8 +54,10 @@ export class LucyExecApprovalHandler {
   constructor(
     private readonly cfg: OpenClawConfig,
     private readonly account: ResolvedLucyAccount,
-    private readonly deviceId: string,
-    private readonly connection: NatsConnection,
+    private readonly cdi: string,
+    private readonly session: ConnectedClient,
+    private readonly userId: string,
+    private readonly cuk: string,
   ) {}
 
   async start(): Promise<void> {
@@ -109,9 +111,10 @@ export class LucyExecApprovalHandler {
   private async handleRequested(request: ExecApprovalRequest): Promise<void> {
     const commandDisplay = resolveExecApprovalCommandDisplay(request.request);
     await publishLucyMachineEvent({
-      account: this.account,
-      connection: this.connection,
-      deviceId: this.deviceId,
+      session: this.session,
+      userId: this.userId,
+      cuk: this.cuk,
+      cdi: this.cdi,
       type: "approval.pending",
       sessionKey: request.request.sessionKey ?? undefined,
       approvalId: request.id,
@@ -127,9 +130,10 @@ export class LucyExecApprovalHandler {
 
   private async handleResolved(resolved: ExecApprovalResolved): Promise<void> {
     await publishLucyMachineEvent({
-      account: this.account,
-      connection: this.connection,
-      deviceId: this.deviceId,
+      session: this.session,
+      userId: this.userId,
+      cuk: this.cuk,
+      cdi: this.cdi,
       type: "approval.resolved",
       approvalId: resolved.id,
       approvalDecision: resolved.decision,

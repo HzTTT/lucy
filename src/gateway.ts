@@ -4,11 +4,8 @@ import type {
   OpenClawConfig,
   PluginRuntime,
 } from "openclaw/plugin-sdk";
-import {
-  downloadLucyMediaDescriptor,
-  ensureLucyMediaStore,
-  uploadLucyMediaFromSource,
-} from "./media.js";
+import type { ConnectedClient, JetStreamMessage } from "lucy-im-sdk";
+import { downloadLucyMediaDescriptor, uploadLucyMediaFromSource } from "./media.js";
 import { startLucyLocalNotifyServer } from "./local-notify.js";
 import {
   handleLucyProvisioningMessage,
@@ -16,13 +13,14 @@ import {
 } from "./provider-provisioning.js";
 // Import handler with lazy loading for backward compatibility
 // (older openclaw versions may not have gateway-runtime / infra-runtime)
-let _approvalHandler: any = null;
+let _approvalHandler: unknown = null;
 let _loadAttempted = false;
-import { startLucyPresenceLoop } from "./presence.js";
-import { hydrateLucyAccountFromState, syncLucyBindingState } from "./auth-binding.js";
-import { buildLucySubjects, connectLucyNats, buildLucyDiscoverSubject, buildLucyPingSubject } from "./nats.js";
+import { syncLucyBindingWithSdk, connectLucySdk } from "./auth-binding.js";
+import { buildLucyImConfig } from "./config.js";
+import { buildNpcSubscribeSubject } from "./nats.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
+import { syncLucyPairingExport } from "./pairing-export.js";
 import type {
   LucyInboundMessage,
   LucyInboundMessageV3,
@@ -31,7 +29,6 @@ import type {
   ResolvedLucyAccount,
 } from "./types.js";
 import { LucyInboundMessageSchema } from "./types.js";
-import { buildLucyBindingCheckUrl } from "./user-center.js";
 
 type LucyGatewayContext = ChannelGatewayContext<ResolvedLucyAccount>;
 type PluginChannelRuntime = PluginRuntime["channel"];
@@ -92,13 +89,14 @@ function buildInboundContext(params: {
   channelRuntime: PluginChannelRuntime;
   route: { agentId: string; sessionKey: string; accountId?: string };
   inbound: LucyInboundMessageV2;
-  deviceId: string;
+  cuk: string;
+  cdi: string;
   rawBody: string;
   mediaPayload?: Record<string, unknown>;
 }) {
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Lucy",
-    from: params.account.channelUserKey ?? "unknown",
+    from: params.cuk || "unknown",
     timestamp: params.inbound.timestamp,
     envelope: params.channelRuntime.reply.resolveEnvelopeFormatOptions(params.cfg),
     body: params.rawBody,
@@ -108,28 +106,30 @@ function buildInboundContext(params: {
     BodyForAgent: params.inbound.text?.trim() || params.rawBody,
     RawBody: params.rawBody,
     CommandBody: params.rawBody,
-    From: `lucy:${params.account.channelUserKey}`,
-    To: `lucy:${params.account.channelUserKey}`,
+    From: `lucy:${params.cuk}`,
+    To: `lucy:${params.cuk}`,
     SessionKey: params.route.sessionKey,
     AccountId: params.route.accountId ?? params.account.accountId,
     ChatType: "direct",
-    ConversationLabel: params.account.channelUserKey,
-    SenderId: params.account.channelUserKey,
+    ConversationLabel: params.cuk,
+    SenderId: params.cuk,
     Provider: "lucy",
     Surface: "lucy",
     MessageSid: params.inbound.messageId,
     OriginatingChannel: "lucy",
-    OriginatingTo: `lucy:${params.account.channelUserKey}`,
+    OriginatingTo: `lucy:${params.cuk}`,
     CommandAuthorized: true,
-    DeviceId: params.deviceId,
+    DeviceId: params.cdi,
     ...(params.mediaPayload ?? {}),
   });
 }
 
 async function publishAssistantFinalEvent(params: {
   account: ResolvedLucyAccount;
-  connection: Awaited<ReturnType<typeof connectLucyNats>>;
-  deviceId: string;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
   sourceMessageId: string;
   runId?: string;
   sessionKey?: string;
@@ -139,8 +139,8 @@ async function publishAssistantFinalEvent(params: {
 }): Promise<void> {
   const trimmedText = params.text?.trim() || undefined;
   const baseEvent = buildLucyMachineEvent({
-    account: params.account,
-    deviceId: params.deviceId,
+    cuk: params.cuk,
+    cdi: params.cdi,
     type: "assistant.final",
     sourceMessageId: params.sourceMessageId,
     runId: params.runId,
@@ -160,11 +160,10 @@ async function publishAssistantFinalEvent(params: {
   for (const [index, candidate] of candidates.entries()) {
     try {
       media = await uploadLucyMediaFromSource({
-        connection: params.connection,
-        account: params.account,
-        deviceId: params.deviceId,
         eventId: baseEvent.eventId,
         mediaUrl: candidate,
+        maxBytes: params.account.mediaMaxBytes,
+        mediaLocalRoots: params.account.mediaLocalRoots,
         trustedLocalPath: true,
       });
       selectedMediaIndex = index;
@@ -178,9 +177,10 @@ async function publishAssistantFinalEvent(params: {
   if (!trimmedText && !media) {
     if (mediaWarning) {
       await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
+        session: params.session,
+        userId: params.userId,
+        cuk: params.cuk,
+        cdi: params.cdi,
         type: "error",
         sourceMessageId: params.sourceMessageId,
         runId: params.runId,
@@ -193,9 +193,10 @@ async function publishAssistantFinalEvent(params: {
 
   if (mediaWarning) {
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "error",
       sourceMessageId: params.sourceMessageId,
       runId: params.runId,
@@ -215,9 +216,10 @@ async function publishAssistantFinalEvent(params: {
         }
       : undefined;
   await publishLucyMachineEvent({
-    account: params.account,
-    connection: params.connection,
-    deviceId: params.deviceId,
+    session: params.session,
+    userId: params.userId,
+    cuk: params.cuk,
+    cdi: params.cdi,
     eventId: baseEvent.eventId,
     type: "assistant.final",
     sourceMessageId: params.sourceMessageId,
@@ -235,313 +237,313 @@ export async function handleLucyInboundMessage(params: {
   channelRuntime: PluginChannelRuntime;
   log?: LucyGatewayContext["log"];
   inbound: unknown;
-  deviceId: string;
-  connection?: Awaited<ReturnType<typeof connectLucyNats>>;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
 }): Promise<void> {
-  if (!params.account.channelUserKey) {
-    throw new Error("lucy channelUserKey is not configured");
+  const parsed = LucyInboundMessageSchema.safeParse(params.inbound);
+  if (!parsed.success) {
+    await publishLucyMachineEvent({
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "error",
+      text: `invalid inbound message: ${parsed.error.issues[0]?.message ?? "unknown error"}`,
+      metadata: {
+        issues: parsed.error.issues.map((issue) => issue.message),
+      },
+    });
+    return;
   }
 
-  let ownedConnection: Awaited<ReturnType<typeof connectLucyNats>> | undefined;
-  const getConnection = async () => {
-    if (params.connection) {
-      return params.connection;
-    }
-    ownedConnection ??= await connectLucyNats(params.account);
-    return ownedConnection;
-  };
+  const parsedInbound = {
+    ...parsed.data,
+    messageId: parsed.data.messageId ?? getProcessSnowflakeGenerator().nextId(),
+  } as LucyInboundMessage;
 
-  try {
-    const parsed = LucyInboundMessageSchema.safeParse(params.inbound);
-    if (!parsed.success) {
+  if (isLucyProvisioningInboundMessage(parsedInbound)) {
+    const inboundChannelUserKey = parsedInbound.channelUserKey ?? parsedInbound.apiKey;
+    const inboundChannelDeviceId = parsedInbound.channelDeviceId ?? parsedInbound.deviceId;
+    if (inboundChannelUserKey && inboundChannelUserKey !== params.cuk) {
       await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
-        type: "error",
-        text: `invalid inbound message: ${parsed.error.issues[0]?.message ?? "unknown error"}`,
-        metadata: {
-          issues: parsed.error.issues.map((issue) => issue.message),
-        },
-      });
-      return;
-    }
-
-    const parsedInbound = {
-      ...parsed.data,
-      messageId: parsed.data.messageId ?? getProcessSnowflakeGenerator().nextId(),
-    } as LucyInboundMessage;
-
-    if (isLucyProvisioningInboundMessage(parsedInbound)) {
-      const inboundChannelUserKey = parsedInbound.channelUserKey ?? parsedInbound.apiKey;
-      const inboundChannelDeviceId = parsedInbound.channelDeviceId ?? parsedInbound.deviceId;
-      if (inboundChannelUserKey && inboundChannelUserKey !== params.account.channelUserKey) {
-        await publishLucyMachineEvent({
-          account: params.account,
-          connection: params.connection,
-          deviceId: params.deviceId,
-          type: "config.error",
-          sourceMessageId: parsedInbound.messageId,
-          text: "payload channelUserKey does not match subject namespace",
-        });
-        return;
-      }
-      if (inboundChannelDeviceId && inboundChannelDeviceId !== params.deviceId) {
-        await publishLucyMachineEvent({
-          account: params.account,
-          connection: params.connection,
-          deviceId: params.deviceId,
-          type: "config.error",
-          sourceMessageId: parsedInbound.messageId,
-          text: "payload channelDeviceId does not match subject namespace",
-        });
-        return;
-      }
-
-      await handleLucyProvisioningMessage({
-        cfg: params.cfg,
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
+        session: params.session,
+        userId: params.userId,
+        cuk: params.cuk,
+        cdi: params.cdi,
+        type: "config.error",
         sourceMessageId: parsedInbound.messageId,
-        provision: parsedInbound.provision,
-        log: params.log,
-      });
-      return;
-    }
-
-    const inbound = normalizeLucyInboundMessage(parsedInbound);
-
-    if (inbound.channelUserKey && inbound.channelUserKey !== params.account.channelUserKey) {
-      await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
-        type: "error",
-        sourceMessageId: inbound.messageId,
         text: "payload channelUserKey does not match subject namespace",
       });
       return;
     }
-    if (inbound.channelDeviceId && inbound.channelDeviceId !== params.deviceId) {
+    if (inboundChannelDeviceId && inboundChannelDeviceId !== params.cdi) {
       await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
-        type: "error",
-        sourceMessageId: inbound.messageId,
+        session: params.session,
+        userId: params.userId,
+        cuk: params.cuk,
+        cdi: params.cdi,
+        type: "config.error",
+        sourceMessageId: parsedInbound.messageId,
         text: "payload channelDeviceId does not match subject namespace",
       });
       return;
     }
 
-    const route = params.channelRuntime.routing.resolveAgentRoute({
-      cfg: params.cfg,
-      channel: "lucy",
-      accountId: params.account.accountId,
-      peer: {
-        kind: "direct",
-        id: params.account.channelUserKey,
-      },
-    });
-
-    if (!route) {
-      await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
-        type: "error",
-        sourceMessageId: inbound.messageId,
-        text: "no OpenClaw route matched for lucy channelUserKey",
-      });
-      return;
-    }
-
-    let mediaPayload: Record<string, unknown> | undefined;
-    if (inbound.media) {
-      const resolvedMedia = await downloadLucyMediaDescriptor({
-        connection: await getConnection(),
-        account: params.account,
-        descriptor: inbound.media,
-      });
-      const saved = await params.channelRuntime.media.saveMediaBuffer(
-        resolvedMedia.buffer,
-        resolvedMedia.contentType,
-        "lucy",
-        params.account.mediaMaxBytes,
-        resolvedMedia.fileName,
-      );
-      const savedContentType = saved.contentType ?? resolvedMedia.contentType;
-      mediaPayload = {
-        MediaPath: saved.path,
-        MediaUrl: saved.path,
-        MediaType: savedContentType,
-        MediaPaths: [saved.path],
-        MediaUrls: [saved.path],
-        MediaTypes: savedContentType ? [savedContentType] : undefined,
-      };
-    }
-
-    const rawBody = buildInboundRawBody(inbound);
-    const ctxPayload = buildInboundContext({
+    await handleLucyProvisioningMessage({
       cfg: params.cfg,
       account: params.account,
-      channelRuntime: params.channelRuntime,
-      route,
-      inbound,
-      deviceId: params.deviceId,
-      rawBody,
-      mediaPayload,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      sourceMessageId: parsedInbound.messageId,
+      provision: parsedInbound.provision,
+      log: params.log,
     });
-    const storePath = params.channelRuntime.session.resolveStorePath(params.cfg.session?.store, {
-      agentId: route.agentId,
-    });
-    await params.channelRuntime.session.recordInboundSession({
-      storePath,
-      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
-      ctx: ctxPayload,
-      onRecordError: (err) => {
-        params.log?.error?.(`lucy: failed updating session meta: ${String(err)}`);
-      },
-    });
+    return;
+  }
 
+  const inbound = normalizeLucyInboundMessage(parsedInbound);
+
+  if (inbound.channelUserKey && inbound.channelUserKey !== params.cuk) {
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
-      type: "inbound.accepted",
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "error",
       sourceMessageId: inbound.messageId,
-      sessionKey: route.sessionKey,
+      text: "payload channelUserKey does not match subject namespace",
     });
+    return;
+  }
+  if (inbound.channelDeviceId && inbound.channelDeviceId !== params.cdi) {
+    await publishLucyMachineEvent({
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "error",
+      sourceMessageId: inbound.messageId,
+      text: "payload channelDeviceId does not match subject namespace",
+    });
+    return;
+  }
 
-    let runId: string | undefined;
-    let activeToolName: string | undefined;
+  const route = params.channelRuntime.routing.resolveAgentRoute({
+    cfg: params.cfg,
+    channel: "lucy",
+    accountId: params.account.accountId,
+    peer: {
+      kind: "direct",
+      id: params.cuk,
+    },
+  });
 
-    await params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher({
-      ctx: ctxPayload,
-      cfg: params.cfg,
-      dispatcherOptions: {
-        deliver: async (payload) => {
-          if (payload.isReasoning) {
-            return;
-          }
-          await publishAssistantFinalEvent({
-            account: params.account,
-            connection: await getConnection(),
-            deviceId: params.deviceId,
-            sourceMessageId: inbound.messageId!,
-            runId,
-            sessionKey: route.sessionKey,
-            text: payload.text,
-            mediaUrl: payload.mediaUrl,
-            mediaUrls: payload.mediaUrls,
-          });
-        },
-        onError: (err, info) => {
-          params.log?.error?.(`[lucy] ${info.kind} reply failed: ${String(err)}`);
-        },
+  if (!route) {
+    await publishLucyMachineEvent({
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "error",
+      sourceMessageId: inbound.messageId,
+      text: "no OpenClaw route matched for lucy channelUserKey",
+    });
+    return;
+  }
+
+  let mediaPayload: Record<string, unknown> | undefined;
+  if (inbound.media) {
+    const resolvedMedia = await downloadLucyMediaDescriptor({
+      descriptor: inbound.media,
+    });
+    const saved = await params.channelRuntime.media.saveMediaBuffer(
+      resolvedMedia.buffer,
+      resolvedMedia.contentType,
+      "lucy",
+      params.account.mediaMaxBytes,
+      resolvedMedia.fileName,
+    );
+    const savedContentType = saved.contentType ?? resolvedMedia.contentType;
+    mediaPayload = {
+      MediaPath: saved.path,
+      MediaUrl: saved.path,
+      MediaType: savedContentType,
+      MediaPaths: [saved.path],
+      MediaUrls: [saved.path],
+      MediaTypes: savedContentType ? [savedContentType] : undefined,
+    };
+  }
+
+  const rawBody = buildInboundRawBody(inbound);
+  const ctxPayload = buildInboundContext({
+    cfg: params.cfg,
+    account: params.account,
+    channelRuntime: params.channelRuntime,
+    route,
+    inbound,
+    cuk: params.cuk,
+    cdi: params.cdi,
+    rawBody,
+    mediaPayload,
+  });
+  const storePath = params.channelRuntime.session.resolveStorePath(params.cfg.session?.store, {
+    agentId: route.agentId,
+  });
+  await params.channelRuntime.session.recordInboundSession({
+    storePath,
+    sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+    ctx: ctxPayload,
+    onRecordError: (err) => {
+      params.log?.error?.(`lucy: failed updating session meta: ${String(err)}`);
+    },
+  });
+
+  await publishLucyMachineEvent({
+    session: params.session,
+    userId: params.userId,
+    cuk: params.cuk,
+    cdi: params.cdi,
+    type: "inbound.accepted",
+    sourceMessageId: inbound.messageId,
+    sessionKey: route.sessionKey,
+  });
+
+  let runId: string | undefined;
+  let activeToolName: string | undefined;
+
+  await params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher({
+    ctx: ctxPayload,
+    cfg: params.cfg,
+    dispatcherOptions: {
+      deliver: async (payload) => {
+        if (payload.isReasoning) {
+          return;
+        }
+        await publishAssistantFinalEvent({
+          account: params.account,
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          sourceMessageId: inbound.messageId!,
+          runId,
+          sessionKey: route.sessionKey,
+          text: payload.text,
+          mediaUrl: payload.mediaUrl,
+          mediaUrls: payload.mediaUrls,
+        });
       },
-      replyOptions: {
-        onAgentRunStart: (nextRunId) => {
-          runId = nextRunId;
-        },
-        onPartialReply: async (payload) => {
-          if (!payload.text?.trim()) {
-            return;
-          }
+      onError: (err, info) => {
+        params.log?.error?.(`[lucy] ${info.kind} reply failed: ${String(err)}`);
+      },
+    },
+    replyOptions: {
+      onAgentRunStart: (nextRunId) => {
+        runId = nextRunId;
+      },
+      onPartialReply: async (payload) => {
+        if (!payload.text?.trim()) {
+          return;
+        }
+        await publishLucyMachineEvent({
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          type: "assistant.partial",
+          sourceMessageId: inbound.messageId,
+          runId,
+          sessionKey: route.sessionKey,
+          text: payload.text,
+        });
+      },
+      onReasoningStream: async (payload) => {
+        if (!payload.text?.trim()) {
+          return;
+        }
+        await publishLucyMachineEvent({
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          type: "reasoning.partial",
+          sourceMessageId: inbound.messageId,
+          runId,
+          sessionKey: route.sessionKey,
+          text: payload.text,
+        });
+      },
+      onReasoningEnd: async () => {
+        await publishLucyMachineEvent({
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          type: "reasoning.final",
+          sourceMessageId: inbound.messageId,
+          runId,
+          sessionKey: route.sessionKey,
+        });
+      },
+      onToolStart: async ({ name }) => {
+        activeToolName = name?.trim() || undefined;
+        await publishLucyMachineEvent({
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          type: "tool.start",
+          sourceMessageId: inbound.messageId,
+          runId,
+          sessionKey: route.sessionKey,
+          toolName: activeToolName,
+        });
+      },
+      onAssistantMessageStart: async () => {
+        if (activeToolName) {
           await publishLucyMachineEvent({
-            account: params.account,
-            connection: params.connection,
-            deviceId: params.deviceId,
-            type: "assistant.partial",
-            sourceMessageId: inbound.messageId,
-            runId,
-            sessionKey: route.sessionKey,
-            text: payload.text,
-          });
-        },
-        onReasoningStream: async (payload) => {
-          if (!payload.text?.trim()) {
-            return;
-          }
-          await publishLucyMachineEvent({
-            account: params.account,
-            connection: params.connection,
-            deviceId: params.deviceId,
-            type: "reasoning.partial",
-            sourceMessageId: inbound.messageId,
-            runId,
-            sessionKey: route.sessionKey,
-            text: payload.text,
-          });
-        },
-        onReasoningEnd: async () => {
-          await publishLucyMachineEvent({
-            account: params.account,
-            connection: params.connection,
-            deviceId: params.deviceId,
-            type: "reasoning.final",
-            sourceMessageId: inbound.messageId,
-            runId,
-            sessionKey: route.sessionKey,
-          });
-        },
-        onToolStart: async ({ name }) => {
-          activeToolName = name?.trim() || undefined;
-          await publishLucyMachineEvent({
-            account: params.account,
-            connection: params.connection,
-            deviceId: params.deviceId,
-            type: "tool.start",
+            session: params.session,
+            userId: params.userId,
+            cuk: params.cuk,
+            cdi: params.cdi,
+            type: "tool.end",
             sourceMessageId: inbound.messageId,
             runId,
             sessionKey: route.sessionKey,
             toolName: activeToolName,
           });
-        },
-        onAssistantMessageStart: async () => {
-          if (activeToolName) {
-            await publishLucyMachineEvent({
-              account: params.account,
-              connection: params.connection,
-              deviceId: params.deviceId,
-              type: "tool.end",
-              sourceMessageId: inbound.messageId,
-              runId,
-              sessionKey: route.sessionKey,
-              toolName: activeToolName,
-            });
-            activeToolName = undefined;
-          }
-          await publishLucyMachineEvent({
-            account: params.account,
-            connection: params.connection,
-            deviceId: params.deviceId,
-            type: "assistant.start",
-            sourceMessageId: inbound.messageId,
-            runId,
-            sessionKey: route.sessionKey,
-          });
-        },
+          activeToolName = undefined;
+        }
+        await publishLucyMachineEvent({
+          session: params.session,
+          userId: params.userId,
+          cuk: params.cuk,
+          cdi: params.cdi,
+          type: "assistant.start",
+          sourceMessageId: inbound.messageId,
+          runId,
+          sessionKey: route.sessionKey,
+        });
       },
-    });
+    },
+  });
 
-    if (activeToolName) {
-      await publishLucyMachineEvent({
-        account: params.account,
-        connection: params.connection,
-        deviceId: params.deviceId,
-        type: "tool.end",
-        sourceMessageId: inbound.messageId,
-        runId,
-        sessionKey: route.sessionKey,
-        toolName: activeToolName,
-      });
-    }
-  } finally {
-    if (ownedConnection) {
-      await ownedConnection.close();
-    }
+  if (activeToolName) {
+    await publishLucyMachineEvent({
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "tool.end",
+      sourceMessageId: inbound.messageId,
+      runId,
+      sessionKey: route.sessionKey,
+      toolName: activeToolName,
+    });
   }
 }
 
@@ -549,69 +551,66 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
   if (!ctx.channelRuntime) {
     throw new Error("channelRuntime not available");
   }
-  const deviceState = await syncLucyBindingState({
-    account: ctx.account,
+
+  const sdkCfg = buildLucyImConfig(ctx.account);
+
+  // Sync binding — waits until bound
+  await syncLucyBindingWithSdk({
+    cfg: sdkCfg,
     signal: ctx.abortSignal,
     log: ctx.log,
     waitForBinding: true,
   });
-  const boundAccount = hydrateLucyAccountFromState(ctx.account, deviceState);
-  if (!boundAccount.channelUserKey) {
-    throw new Error("lucy channelUserKey is not configured");
-  }
-  const subjects = buildLucySubjects({
-    subjectPrefix: boundAccount.subjectPrefix,
-    channelUserKey: boundAccount.channelUserKey,
-    channelDeviceId: deviceState.channelDeviceId,
+
+  // Connect to NATS via SDK
+  const { client: session, cdi, userId, cuk } = await connectLucySdk({ cfg: sdkCfg });
+
+  // Sync pairing export with SDK home dir
+  await syncLucyPairingExport(ctx.account.homeDir).catch(() => {
+    // Non-fatal: pairing export is for BLE handoff only
   });
-  const connection = await connectLucyNats(boundAccount);
-  await ensureLucyMediaStore({
-    connection,
-    account: boundAccount,
-  });
-  const subscription = connection.subscribe(subjects.clientSubject);
+
+  let localNotifyServer: Awaited<ReturnType<typeof startLucyLocalNotifyServer>> | null = null;
   let stopped = false;
 
-  // Presence: build the _discover subject for heartbeat and offline notifications.
-  const discoverSubject = buildLucyDiscoverSubject({
-    subjectPrefix: boundAccount.subjectPrefix,
-    channelUserKey: boundAccount.channelUserKey,
-  });
-  const pingSubject = buildLucyPingSubject({
-    subjectPrefix: boundAccount.subjectPrefix,
-    channelUserKey: boundAccount.channelUserKey,
-    channelDeviceId: deviceState.channelDeviceId,
-  });
-  const presenceLoop = startLucyPresenceLoop({
-    connection,
-    discoverSubject,
-    pingSubject,
-    channelUserKey: boundAccount.channelUserKey,
-    channelDeviceId: deviceState.channelDeviceId,
-    log: ctx.log,
-  });
-  let localNotifyServer: Awaited<ReturnType<typeof startLucyLocalNotifyServer>> | null = null;
+  const stop = () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    (_approvalHandler as { stop?: () => void } | null)?.stop?.();
+    void localNotifyServer?.stop().catch((err) => {
+      ctx.log?.warn?.(`[lucy] local notify shutdown failed: ${String(err)}`);
+    });
+    void session.shutdown().catch(() => undefined);
+    updateLucyStatus(ctx, {
+      running: false,
+      lastStopAt: Date.now(),
+    });
+  };
+
   try {
-    await presenceLoop.ready;
-    localNotifyServer = boundAccount.localNotify
+    localNotifyServer = ctx.account.localNotify
       ? await startLucyLocalNotifyServer({
-          account: boundAccount,
-          connection,
-          deviceId: deviceState.channelDeviceId,
-          notify: boundAccount.localNotify,
+          account: ctx.account,
+          session,
+          userId,
+          cuk,
+          cdi,
+          notify: ctx.account.localNotify,
           log: ctx.log,
         })
       : null;
+
     await publishLucyRestartCompletionIfPending({
-      account: boundAccount,
-      connection,
-      deviceId: deviceState.channelDeviceId,
+      session,
+      userId,
+      cuk,
+      cdi,
     });
   } catch (err) {
     await localNotifyServer?.stop().catch(() => undefined);
-    presenceLoop.stop();
-    subscription.unsubscribe();
-    await connection.close().catch(() => undefined);
+    void session.shutdown().catch(() => undefined);
     throw err;
   }
 
@@ -622,11 +621,13 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
       const { LucyExecApprovalHandler } = await import("./exec-approvals-handler.js");
       _approvalHandler = new LucyExecApprovalHandler(
         ctx.cfg,
-        boundAccount,
-        deviceState.channelDeviceId,
-        connection,
+        ctx.account,
+        cdi,
+        session,
+        userId,
+        cuk,
       );
-      await _approvalHandler.start();
+      await (_approvalHandler as { start(): Promise<void> }).start();
     } catch (err) {
       ctx.log?.info?.(
         `[lucy] exec approvals not available (requires newer openclaw): ${err instanceof Error ? err.message : String(err)}`,
@@ -635,82 +636,77 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     }
   }
 
-  const stop = () => {
-    if (stopped) {
-      return;
-    }
-    stopped = true;
-    _approvalHandler?.stop?.();
-    presenceLoop.stop();
-    subscription.unsubscribe();
-    void localNotifyServer?.stop().catch((err) => {
-      ctx.log?.warn?.(`[lucy] local notify shutdown failed: ${String(err)}`);
-    });
-    void connection.drain().catch(async () => {
-      await connection.close();
-    });
-    updateLucyStatus(ctx, {
-      running: false,
-      lastStopAt: Date.now(),
-    });
-  };
-
   if (ctx.abortSignal.aborted) {
     stop();
   } else {
     ctx.abortSignal.addEventListener("abort", stop, { once: true });
   }
 
+  const subscribeSubject = buildNpcSubscribeSubject(userId, cdi);
+  const publishSubject = `cephalon.im.user.${userId}`;
+
   updateLucyStatus(ctx, {
     running: true,
     lastStartAt: Date.now(),
-    audience: boundAccount.channelUserKey,
-    cliPath: subjects.clientSubject,
-    dbPath: subjects.machineSubject,
+    audience: cuk,
+    cliPath: subscribeSubject,
+    dbPath: publishSubject,
     application: {
-      channelDeviceId: deviceState.channelDeviceId,
-      bindingStatus: deviceState.bindingStatus,
-      bindingCheckUrl: buildLucyBindingCheckUrl(deviceState.channelDeviceId),
+      channelDeviceId: cdi,
+      bindingStatus: "bound",
       localNotifyUrl: localNotifyServer?.url ?? null,
     },
   });
   ctx.log?.info(
-    `[lucy] listening on ${subjects.clientSubject} and publishing to ${subjects.machineSubject} (media bucket: ${boundAccount.mediaBucket})`,
+    `[lucy] listening on ${subscribeSubject} and publishing to ${publishSubject}`,
   );
 
   try {
-    for await (const msg of subscription) {
+    await session.subscribeChannel(subscribeSubject, async (msg: JetStreamMessage) => {
+      if (stopped) return;
       try {
-        updateLucyStatus(ctx, {
-          lastInboundAt: Date.now(),
-        });
-        const payload = msg.json<unknown>();
+        updateLucyStatus(ctx, { lastInboundAt: Date.now() });
+        let payload: unknown;
+        try {
+          payload = JSON.parse(Buffer.from(msg.payload).toString("utf8")) as unknown;
+        } catch {
+          payload = msg.payload;
+        }
         await handleLucyInboundMessage({
           cfg: ctx.cfg,
-          account: boundAccount,
-          channelRuntime: ctx.channelRuntime,
+          account: ctx.account,
+          channelRuntime: ctx.channelRuntime!,
           log: ctx.log,
           inbound: payload,
-          deviceId: deviceState.channelDeviceId,
-          connection,
+          session,
+          userId,
+          cuk,
+          cdi,
         });
-        updateLucyStatus(ctx, {
-          lastOutboundAt: Date.now(),
-        });
+        updateLucyStatus(ctx, { lastOutboundAt: Date.now() });
       } catch (err) {
-        updateLucyStatus(ctx, {
-          lastError: String(err),
-        });
+        updateLucyStatus(ctx, { lastError: String(err) });
         ctx.log?.error?.(`[lucy] inbound dispatch failed: ${String(err)}`);
         await publishLucyMachineEvent({
-          account: boundAccount,
-          connection,
-          deviceId: deviceState.channelDeviceId,
+          session,
+          userId,
+          cuk,
+          cdi,
           type: "error",
           text: `inbound dispatch failed: ${String(err)}`,
         });
       }
-    }
+    });
+
+    // Block until abortSignal fires — subscribeChannel runs in background,
+    // so we must keep startLucyGateway alive to prevent OpenClaw auto-restart.
+    await new Promise<void>((resolve) => {
+      if (ctx.abortSignal.aborted) {
+        resolve();
+        return;
+      }
+      ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+    });
   } catch (err) {
     if (!stopped) {
       updateLucyStatus(ctx, {
@@ -718,7 +714,7 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
         lastError: String(err),
         lastStopAt: Date.now(),
       });
-      ctx.log?.error?.(`[lucy] NATS loop failed: ${String(err)}`);
+      ctx.log?.error?.(`[lucy] subscription loop failed: ${String(err)}`);
       throw err;
     }
   } finally {

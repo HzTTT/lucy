@@ -3,20 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadLucyMediaFromSourceMock = vi.hoisted(() => vi.fn());
 const publishLucyMachineEventMock = vi.hoisted(() => vi.fn());
-const closeConnectionMock = vi.hoisted(() => vi.fn());
-const syncLucyBindingStateMock = vi.hoisted(() => vi.fn());
-const hydrateLucyAccountFromStateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./media.js", () => ({
-  ensureLucyMediaStore: vi.fn(),
   uploadLucyMediaFromSource: vi.fn((params) => uploadLucyMediaFromSourceMock(params)),
 }));
 
 vi.mock("./nats.js", () => ({
-  buildLucySubjects: vi.fn(),
-  connectLucyNats: vi.fn(async () => ({
-    close: closeConnectionMock,
-  })),
+  buildNpcSubscribeSubject: vi.fn((userId: string, cdi: string) => `cephalon.im.npc.${userId}.${cdi}`),
+  buildNpcPublishSubject: vi.fn((userId: string) => `cephalon.im.user.${userId}`),
+  serializeLucyMachineEventJson: vi.fn(() => "{}"),
 }));
 
 vi.mock("./send.js", () => ({
@@ -27,10 +22,18 @@ vi.mock("./send.js", () => ({
 }));
 
 vi.mock("./auth-binding.js", () => ({
-  syncLucyBindingState: vi.fn(async (params) => syncLucyBindingStateMock(params)),
-  hydrateLucyAccountFromState: vi.fn((account, state) =>
-    hydrateLucyAccountFromStateMock(account, state),
-  ),
+  syncLucyBindingWithSdk: vi.fn(),
+  connectLucySdk: vi.fn(async () => ({
+    client: {
+      publishChannel: vi.fn(async () => undefined),
+      subscribeChannel: vi.fn(async () => undefined),
+      accessToken: vi.fn(() => "cuk_demo_user"),
+      shutdown: vi.fn(async () => undefined),
+    },
+    cdi: "2080563661542787073",
+    userId: "user_demo",
+    cuk: "cuk_demo_user",
+  })),
 }));
 
 vi.mock("./snowflake.js", () => ({
@@ -53,36 +56,16 @@ import {
 
 describe("normalizeLucyOutboundTarget", () => {
   beforeEach(() => {
-    syncLucyBindingStateMock.mockReset();
-    syncLucyBindingStateMock.mockResolvedValue({
-      version: 2,
-      channelDeviceId: "2080563661542787073",
-      bootstrapToken: "cbt_test",
-      bindingStatus: "bound",
-      channelUserKey: "cuk_demo_user",
-      createdAtMs: 1773160840000,
-    });
-    hydrateLucyAccountFromStateMock.mockReset();
-    hydrateLucyAccountFromStateMock.mockImplementation((account, state) => ({
-      ...account,
-      channelUserKey: state.channelUserKey,
-      channelDeviceId: state.channelDeviceId,
-      bootstrapToken: state.bootstrapToken,
-    }));
     uploadLucyMediaFromSourceMock.mockReset();
     uploadLucyMediaFromSourceMock.mockResolvedValue({
-      transport: "jetstream-object-store",
-      bucket: "lucy_media_v2",
-      key: "outbound/cuk_demo_user/device/reply.png",
+      transport: "iroh-blob",
+      blob_ref: "blob:abc123",
       kind: "image",
       contentType: "image/png",
       size: 5,
       fileName: "reply.png",
-      sha256: "abc123",
     });
     publishLucyMachineEventMock.mockReset();
-    closeConnectionMock.mockReset();
-    closeConnectionMock.mockResolvedValue(undefined);
   });
 
   it("strips the lucy: prefix used by message tool targets", () => {
@@ -113,7 +96,8 @@ describe("normalizeLucyOutboundTarget", () => {
       cfg: {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
             mediaLocalRoots: [" /srv/lucy-media ", "/tmp/openclaw-workspace"],
           },
         },
@@ -141,7 +125,13 @@ describe("normalizeLucyOutboundTarget", () => {
 describe("lucyPlugin.execApprovals", () => {
   it("getInitiatingSurfaceState returns enabled for a configured account", () => {
     const cfg = {
-      channels: { lucy: { enabled: true, channelUserKey: "cuk_demo" } },
+      channels: {
+        lucy: {
+          enabled: true,
+          userCenterDomain: "user-center.lucy.run",
+          lucyServerDomain: "chat.lucy.run",
+        },
+      },
     } as any;
     const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
       cfg,

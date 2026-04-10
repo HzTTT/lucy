@@ -3,19 +3,13 @@ import { z } from "zod";
 export const LUCY_CHANNEL_ID = "lucy";
 export const DEFAULT_ACCOUNT_ID = "default";
 export const DEFAULT_SUBJECT_PREFIX = "cephalon.im.npc";
-export const DEFAULT_NATS_SERVER = "nats://127.0.0.1:4222";
-export const DEFAULT_MEDIA_BUCKET = "lucy_media_v2";
-export const DEFAULT_MEDIA_RETENTION_HOURS = 168;
-export const DEFAULT_MEDIA_MAX_MB = 20;
+export const DEFAULT_HOME_DIR = "~/data/lucy_im/";
 export const DEFAULT_LOCAL_NOTIFY_BIND = "127.0.0.1";
 export const DEFAULT_LOCAL_NOTIFY_PORT = 8788;
 export const DEFAULT_LOCAL_NOTIFY_PATH = "/usb-events";
-export const DEVICE_STATE_VERSION = 2;
-export const LUCY_USER_CENTER_BASE_URL = "https://prod.unicorn.org.cn/cephalon/user-center";
+export const DEFAULT_MEDIA_MAX_MB = 20;
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
-export const OBJECT_STORE_BUCKET_RE = /^[-\w]+$/;
-export const OBJECT_STORE_KEY_RE = /^[-/=.\w]+$/;
-export const LUCY_MEDIA_TRANSPORT = "jetstream-object-store";
+export const LUCY_MEDIA_TRANSPORT = "iroh-blob";
 export const LucyBindingStatusSchema = z.enum(["pending", "registered", "bound"]);
 
 export const LucyMessageIdSchema = z.string().regex(/^\d{19}$/);
@@ -24,13 +18,11 @@ export const LucyMediaKindSchema = z.enum(["image", "audio", "video", "document"
 
 export const LucyMediaDescriptorSchema = z.object({
   transport: z.literal(LUCY_MEDIA_TRANSPORT),
-  bucket: z.string().regex(OBJECT_STORE_BUCKET_RE),
-  key: z.string().regex(OBJECT_STORE_KEY_RE),
+  blob_ref: z.string().min(1),
   kind: LucyMediaKindSchema,
   contentType: z.string().min(1).optional(),
   size: z.number().int().nonnegative(),
   fileName: z.string().min(1).optional(),
-  sha256: z.string().min(1).optional(),
 });
 
 export const LucyDmPolicySchema = z.enum(["allowlist", "open", "disabled"]);
@@ -59,19 +51,13 @@ export const LucyLocalNotifyPayloadSchema = z.object({
 export const LucyConfigSchema = z.object({
   name: z.string().optional(),
   enabled: z.boolean().optional(),
-  servers: z.array(z.string().min(1)).optional(),
-  channelUserKey: z.string().min(1).optional(),
-  channelDeviceId: LucyMessageIdSchema.optional(),
-  bootstrapToken: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
+  userCenterDomain: z.string().min(1).optional(),
+  lucyServerDomain: z.string().min(1).optional(),
+  homeDir: z.string().min(1).optional(),
+  kind: z.enum(["lucy", "nas"]).optional(),
   subjectPrefix: z.string().min(1).optional(),
-  token: z.string().min(1).optional(),
-  username: z.string().min(1).optional(),
-  password: z.string().min(1).optional(),
   dmPolicy: LucyDmPolicySchema.optional(),
   allowFrom: z.array(z.string().min(1)).optional(),
-  mediaBucket: z.string().regex(OBJECT_STORE_BUCKET_RE).optional(),
-  mediaRetentionHours: z.number().int().positive().optional(),
   mediaMaxMb: z.number().positive().optional(),
   mediaLocalRoots: z.array(z.string().min(1)).optional(),
   localNotify: LucyLocalNotifyConfigSchema.optional(),
@@ -230,32 +216,18 @@ export const LucyMachineEventSchema = z.object({
 
 export type LucyMachineEvent = z.infer<typeof LucyMachineEventSchema>;
 
-export type LucyDeviceState = {
-  version: 2;
-  channelDeviceId: string;
-  bootstrapToken: string;
-  bindingStatus: LucyBindingStatus;
-  channelUserKey?: string;
-  createdAtMs: number;
-};
-
 export type ResolvedLucyAccount = {
   accountId: string;
   enabled: boolean;
   configured: boolean;
   name?: string;
-  servers: string[];
-  channelUserKey?: string;
-  channelDeviceId?: string;
-  bootstrapToken?: string;
+  userCenterDomain: string;
+  lucyServerDomain: string;
+  homeDir: string;
+  kind: "lucy" | "nas";
   subjectPrefix: string;
-  token?: string;
-  username?: string;
-  password?: string;
   dmPolicy: LucyDmPolicy;
   allowFrom: string[];
-  mediaBucket: string;
-  mediaRetentionHours: number;
   mediaMaxBytes: number;
   mediaLocalRoots?: string[];
   localNotify?: {
@@ -267,11 +239,6 @@ export type ResolvedLucyAccount = {
   restartHelperCommand?: string;
   restartHelperArgs?: string[];
   restartOnlineTimeoutMs?: number;
-};
-
-export type LucySubjects = {
-  clientSubject: string;
-  machineSubject: string;
 };
 
 export type LucyProbe = {

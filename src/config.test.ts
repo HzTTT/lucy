@@ -1,7 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { describe, expect, it } from "vitest";
 import {
-  isValidObjectStoreBucket,
   listLucyAccountIds,
   resolveLucyAccount,
   unconfiguredLucyReason,
@@ -13,21 +12,20 @@ describe("lucy config", () => {
     expect(listLucyAccountIds({} as OpenClawConfig)).toEqual(["default"]);
   });
 
-  it("defaults allowFrom to channelUserKey", () => {
+  it("defaults allowFrom to empty array", () => {
     const account = resolveLucyAccount(
       {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
           },
         },
       } as OpenClawConfig,
       "default",
     );
-    expect(account.allowFrom).toEqual(["cuk_demo_user"]);
+    expect(account.allowFrom).toEqual([]);
     expect(account.configured).toBe(true);
-    expect(account.mediaBucket).toBe("lucy_media_v2");
-    expect(account.mediaRetentionHours).toBe(168);
     expect(account.mediaMaxBytes).toBe(20 * 1024 * 1024);
   });
 
@@ -36,7 +34,8 @@ describe("lucy config", () => {
       {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
             mediaLocalRoots: [" /srv/lucy-media ", "/mnt/attachments"],
           },
         },
@@ -52,7 +51,8 @@ describe("lucy config", () => {
       {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
             localNotify: {
               enabled: true,
             },
@@ -76,7 +76,8 @@ describe("lucy config", () => {
       {
         channels: {
           lucy: {
-            channelUserKey: "cuk_demo_user",
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
             localNotify: {
               enabled: true,
               port: 70000,
@@ -91,37 +92,25 @@ describe("lucy config", () => {
     expect(unconfiguredLucyReason(account)).toContain("localNotify.port");
   });
 
-  it("treats invalid channelUserKey tokens as unconfigured", () => {
+  it("treats missing userCenterDomain as unconfigured", () => {
     const account = resolveLucyAccount(
       {
         channels: {
           lucy: {
-            channelUserKey: "bad.token",
+            lucyServerDomain: "chat.lucy.run",
           },
         },
       } as OpenClawConfig,
       "default",
     );
     expect(account.configured).toBe(false);
-    expect(unconfiguredLucyReason(account)).toContain("channelUserKey");
-    expect(isValidSubjectToken("bad.token")).toBe(false);
+    expect(unconfiguredLucyReason(account)).toContain("userCenterDomain");
   });
 
-  it("treats invalid media bucket names as unconfigured", () => {
-    const account = resolveLucyAccount(
-      {
-        channels: {
-          lucy: {
-            channelUserKey: "cuk_demo_user",
-            mediaBucket: "bad.bucket",
-          },
-        },
-      } as OpenClawConfig,
-      "default",
-    );
-
-    expect(account.configured).toBe(false);
-    expect(unconfiguredLucyReason(account)).toContain("mediaBucket");
-    expect(isValidObjectStoreBucket("bad.bucket")).toBe(false);
+  it("validates subject tokens", () => {
+    expect(isValidSubjectToken("cuk_demo_user")).toBe(true);
+    expect(isValidSubjectToken("bad.token")).toBe(false);
+    expect(isValidSubjectToken("")).toBe(false);
+    expect(isValidSubjectToken(undefined)).toBe(false);
   });
 });

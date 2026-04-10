@@ -1,6 +1,8 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-models";
-import { runCommandWithTimeout } from "openclaw/plugin-sdk/process-runtime";
+// runCommandWithTimeout is resolved from the plugin runtime at call time
+// to avoid a static runtime openclaw/plugin-sdk import (sdk-compat boundary).
+import type { ConnectedClient } from "lucy-im-sdk";
 import {
   clearLucyRestartTicket,
   readLucyRestartTicket,
@@ -279,6 +281,7 @@ export async function spawnLucyRestartHelper(params: {
   // so the plugin passes the install-time security scan.
   // Fire-and-forget: the restart command outlives this process
   // (reparented to init on Linux when the gateway dies).
+  const { runCommandWithTimeout } = getLucyRuntime().system;
   void runCommandWithTimeout([command, ...args], 120_000).catch(() => {});
 }
 
@@ -302,8 +305,10 @@ function buildRestartTicket(params: {
 export async function handleLucyProvisioningMessage(params: {
   cfg: OpenClawConfig;
   account: ResolvedLucyAccount;
-  connection?: Parameters<typeof publishLucyMachineEvent>[0]["connection"];
-  deviceId: string;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
   sourceMessageId?: string;
   provision: LucyProvisioningPayload;
   log?: {
@@ -314,9 +319,10 @@ export async function handleLucyProvisioningMessage(params: {
 }): Promise<void> {
   if (params.provision.providerId !== LUCY_CEPHALON_PROVIDER_ID) {
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "config.error",
       sourceMessageId: params.sourceMessageId,
       text: `unsupported provider: ${params.provision.providerId}`,
@@ -334,9 +340,10 @@ export async function handleLucyProvisioningMessage(params: {
     await runtimeConfig.writeConfigFile(nextCfg);
 
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "config.updated",
       sourceMessageId: params.sourceMessageId,
       text: `configured ${params.provision.providerId}/${params.provision.modelId}`,
@@ -357,9 +364,10 @@ export async function handleLucyProvisioningMessage(params: {
     });
     await writeLucyRestartTicket(ticket);
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "restart.scheduled",
       sourceMessageId: params.sourceMessageId,
       text: "configuration applied; restarting gateway",
@@ -379,9 +387,10 @@ export async function handleLucyProvisioningMessage(params: {
     await clearLucyRestartTicket().catch(() => {});
     params.log?.error?.(`[lucy] provisioning failed: ${String(err)}`);
     await publishLucyMachineEvent({
-      account: params.account,
-      connection: params.connection,
-      deviceId: params.deviceId,
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
       type: "config.error",
       sourceMessageId: params.sourceMessageId,
       text: `provisioning failed: ${String(err)}`,
@@ -394,9 +403,10 @@ export async function handleLucyProvisioningMessage(params: {
 }
 
 export async function publishLucyRestartCompletionIfPending(params: {
-  account: ResolvedLucyAccount;
-  connection?: Parameters<typeof publishLucyMachineEvent>[0]["connection"];
-  deviceId: string;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
 }): Promise<void> {
   const ticket = await readLucyRestartTicket();
   if (!ticket) {
@@ -404,9 +414,10 @@ export async function publishLucyRestartCompletionIfPending(params: {
   }
 
   await publishLucyMachineEvent({
-    account: params.account,
-    connection: params.connection,
-    deviceId: params.deviceId,
+    session: params.session,
+    userId: params.userId,
+    cuk: params.cuk,
+    cdi: params.cdi,
     type: "restart.completed",
     text: "gateway restart completed",
     metadata: {

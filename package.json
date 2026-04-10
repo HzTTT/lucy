@@ -20,14 +20,13 @@
     "access": "public"
   },
   "dependencies": {
+    "lucy-im-sdk": "file:./lucy-im-sdk",
     "nats": "^2.29.3",
     "qrcode-terminal": "^0.12.0",
-    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/qrcode-terminal": "^0.12.2",
-    "@types/ws": "^8.18.1",
     "openclaw": "*",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

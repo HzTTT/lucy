@@ -1,17 +1,15 @@
-import type { NatsConnection } from "nats";
-import { connectLucyNats, buildLucySubjects, encodeLucyMachineEvent } from "./nats.js";
+import type { ConnectedClient } from "lucy-im-sdk";
+import { buildNpcPublishSubject, serializeLucyMachineEventJson } from "./nats.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
-import { loadOrCreateLucyDeviceState } from "./state.js";
 import type {
   LucyMachineEvent,
   LucyMachineEventType,
   LucyMediaDescriptor,
-  ResolvedLucyAccount,
 } from "./types.js";
 
 type BuildMachineEventParams = {
-  account: ResolvedLucyAccount;
-  deviceId: string;
+  cuk: string;
+  cdi: string;
   type: LucyMachineEventType;
   eventId?: string;
   sourceMessageId?: string;
@@ -33,16 +31,13 @@ type BuildMachineEventParams = {
 };
 
 export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMachineEvent {
-  if (!params.account.channelUserKey) {
-    throw new Error("lucy channelUserKey is not configured");
-  }
   return {
     version: 2,
     eventId: params.eventId ?? getProcessSnowflakeGenerator().nextId(),
     type: params.type,
     timestamp: Date.now(),
-    channelUserKey: params.account.channelUserKey,
-    channelDeviceId: params.deviceId,
+    channelUserKey: params.cuk,
+    channelDeviceId: params.cdi,
     sourceMessageId: params.sourceMessageId,
     runId: params.runId,
     sessionKey: params.sessionKey,
@@ -63,9 +58,10 @@ export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMach
 }
 
 export async function publishLucyMachineEvent(params: {
-  account: ResolvedLucyAccount;
-  connection?: NatsConnection;
-  deviceId?: string;
+  session: ConnectedClient;
+  userId: string;
+  cuk: string;
+  cdi: string;
   type: LucyMachineEventType;
   eventId?: string;
   sourceMessageId?: string;
@@ -85,29 +81,8 @@ export async function publishLucyMachineEvent(params: {
   approvalDecision?: string;
   approvalResolvedBy?: string;
 }): Promise<LucyMachineEvent> {
-  if (!params.account.channelUserKey) {
-    throw new Error("lucy channelUserKey is not configured");
-  }
-  const deviceState = params.deviceId
-    ? { channelDeviceId: params.deviceId }
-    : await loadOrCreateLucyDeviceState();
-  const event = buildLucyMachineEvent({
-    ...params,
-    deviceId: deviceState.channelDeviceId,
-  });
-  const connection = params.connection ?? (await connectLucyNats(params.account));
-  try {
-    const subjects = buildLucySubjects({
-      subjectPrefix: params.account.subjectPrefix,
-      channelUserKey: params.account.channelUserKey,
-      channelDeviceId: deviceState.channelDeviceId,
-    });
-    connection.publish(subjects.machineSubject, encodeLucyMachineEvent(event));
-    await connection.flush();
-    return event;
-  } finally {
-    if (!params.connection) {
-      await connection.close();
-    }
-  }
+  const event = buildLucyMachineEvent(params);
+  const subject = buildNpcPublishSubject(params.userId);
+  await params.session.publishChannel(subject, serializeLucyMachineEventJson(event));
+  return event;
 }
