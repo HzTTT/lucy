@@ -56,28 +56,7 @@ Content-Type: application/json
 → { "cdi": "2042541809425543168", "status": "bound" }
 ```
 
-### 2.3 查询已绑定设备
-
-```
-GET {user-center}/v1/channels/lucy/current-user/device-bindings
-Authorization: Bearer <token>
-
-→ {
-    "code": 20000,
-    "data": {
-      "devices": [
-        {
-          "channel": "lucy",
-          "channel_device_id": "2042541809425543168",
-          "binding_status": "bound",
-          "bound_at": "2026-04-10T16:56:49+08:00"
-        }
-      ]
-    }
-  }
-```
-
-### 2.4 获取 NATS 连接凭据
+### 2.3 获取 NATS 连接凭据
 
 ```
 POST {lucy-server}/v1/channels/lucy/nats/token/user
@@ -98,23 +77,7 @@ Authorization: Bearer <token>
 NATS CONNECT { token: "random_auth_token" }
 ```
 
-### 2.5 获取用户凭据
-
-```
-GET {user-center}/v1/channels/lucy/current-user/credential
-Authorization: Bearer <token>
-
-→ {
-    "code": 20000,
-    "data": {
-      "channel": "lucy",
-      "channel_user_key": "cuk-xxx",
-      "status": "active"
-    }
-  }
-```
-
-### 2.6 获取模型配置
+### 2.4 获取模型配置
 
 ```
 GET {user-center}/v1/channels/lucy/current-user/model-config

@@ -43,45 +43,9 @@ App 侧通过 `lucy-im-sdk-kotlin` 获取自己的 NATS 凭据（IM_USER JetStre
 
 推荐的 App 侧取数方式：
 
-1. `POST /v1/login`
-2. `GET /v1/channels/lucy/current-user/device-bindings`
-3. `GET /v1/channels/lucy/current-user/credential`
-4. `GET /v1/channels/lucy/current-user/model-config`
-
-当前真实响应示例：
-
-### `current-user/device-bindings`
-
-```json
-{
-  "code": 20000,
-  "msg": "操作成功",
-  "data": {
-    "devices": [
-      {
-        "channel": "lucy",
-        "channel_device_id": "2033138771050475520",
-        "binding_status": "bound",
-        "bound_at": "2026-03-15T19:18:14.970013+08:00"
-      }
-    ]
-  }
-}
-```
-
-### `current-user/credential`
-
-```json
-{
-  "code": 20000,
-  "msg": "操作成功",
-  "data": {
-    "channel": "lucy",
-    "channel_user_key": "cuk_xxx",
-    "status": "active"
-  }
-}
-```
+1. `POST {user-center}/v1/login`
+2. `POST {lucy-server}/v1/channels/lucy/nats/token/user`（获取 NATS 连接凭据）
+3. `GET {user-center}/v1/channels/lucy/current-user/model-config`（获取模型配置）
 
 ### `current-user/model-config`
 
