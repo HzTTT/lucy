@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
 import {
@@ -203,61 +206,58 @@ export const lucyPlugin: ChannelPlugin<ResolvedLucyAccount, LucyProbe> = {
     defaultRuntime: createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID),
     collectStatusIssues: (accounts) => collectStatusIssuesFromLastError("lucy", accounts),
     probeAccount: async ({ account }) => {
-      const sdkCfg = buildLucyImConfig(account);
-      try {
-        const { client: session, cdi, userId, cuk } = await connectLucySdk({ cfg: sdkCfg });
+      // Read-only probe: inspect local homeDir state instead of opening a NATS
+      // connection. A previous version called connectLucySdk() here, which made
+      // the probe expensive (fetch NATS token + new connection + presence
+      // spawn) and destructive — at typical web-UI polling rates it produced
+      // 60+ fetch_nats_token_npc requests per minute and disrupted the
+      // long-lived subscribe loop in startLucyGateway.
+      const home = account.homeDir.startsWith("~")
+        ? account.homeDir.replace("~", homedir())
+        : account.homeDir;
+      const channelIdsDir = join(home, "channel_ids");
+      const readOptional = async (name: string): Promise<string | undefined> => {
         try {
-          const subscribeSubject = `cephalon.im.npc.${userId}.${cdi}`;
-          const publishSubject = `cephalon.im.user.${userId}`;
-          return {
-            ok: true,
-            bindingStatus: "bound" as const,
-            connectedUrl: account.lucyServerDomain,
-            clientSubject: subscribeSubject,
-            machineSubject: publishSubject,
-            channelDeviceId: cdi,
-            channelUserKey: cuk,
-            bindingCheckUrl: `https://${account.userCenterDomain}/v1/channels/lucy/device-bindings/${encodeURIComponent(cdi)}`,
-            userCenterBaseUrl: `https://${account.userCenterDomain}`,
-            mediaBucket: "",
-            mediaRetentionHours: 0,
-          };
-        } finally {
-          await session.shutdown().catch(() => undefined);
-        }
-      } catch {
-        // Try to get cdi from identity without connecting
-        try {
-          const { LucyImClient } = await import("lucy-im-sdk");
-          const imClient = new LucyImClient(sdkCfg);
-          const identity = await imClient.deviceIdentity();
-          return {
-            ok: true,
-            bindingStatus: (identity.user_id ? "bound" : "pending") as "bound" | "pending",
-            connectedUrl: null,
-            clientSubject: null,
-            machineSubject: null,
-            channelDeviceId: identity.cdi,
-            bindingCheckUrl: `https://${account.userCenterDomain}/v1/channels/lucy/device-bindings/${encodeURIComponent(identity.cdi)}`,
-            userCenterBaseUrl: `https://${account.userCenterDomain}`,
-            mediaBucket: "",
-            mediaRetentionHours: 0,
-          };
+          const value = (await readFile(join(channelIdsDir, name), "utf8")).trim();
+          return value || undefined;
         } catch {
-          return {
-            ok: true,
-            bindingStatus: "pending" as const,
-            connectedUrl: null,
-            clientSubject: null,
-            machineSubject: null,
-            channelDeviceId: "unknown",
-            bindingCheckUrl: `https://${account.userCenterDomain}/v1/channels/lucy/device-bindings/unknown`,
-            userCenterBaseUrl: `https://${account.userCenterDomain}`,
-            mediaBucket: "",
-            mediaRetentionHours: 0,
-          };
+          return undefined;
         }
+      };
+      const [cdi, userId, cuk] = await Promise.all([
+        readOptional("cdi"),
+        readOptional("user_id"),
+        readOptional("cuk"),
+      ]);
+
+      if (cdi && userId && cuk) {
+        return {
+          ok: true,
+          bindingStatus: "bound" as const,
+          connectedUrl: account.lucyServerDomain,
+          clientSubject: `cephalon.im.npc.${userId}.${cdi}`,
+          machineSubject: `cephalon.im.user.${userId}`,
+          channelDeviceId: cdi,
+          channelUserKey: cuk,
+          bindingCheckUrl: `https://${account.userCenterDomain}/v1/channels/lucy/device-bindings/${encodeURIComponent(cdi)}`,
+          userCenterBaseUrl: `https://${account.userCenterDomain}`,
+          mediaBucket: "",
+          mediaRetentionHours: 0,
+        };
       }
+
+      return {
+        ok: true,
+        bindingStatus: "pending" as const,
+        connectedUrl: null,
+        clientSubject: null,
+        machineSubject: null,
+        channelDeviceId: cdi ?? "unknown",
+        bindingCheckUrl: `https://${account.userCenterDomain}/v1/channels/lucy/device-bindings/${encodeURIComponent(cdi ?? "unknown")}`,
+        userCenterBaseUrl: `https://${account.userCenterDomain}`,
+        mediaBucket: "",
+        mediaRetentionHours: 0,
+      };
     },
     buildAccountSnapshot: ({ account, runtime, probe }) => ({
       accountId: account.accountId,
