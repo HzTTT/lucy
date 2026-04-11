@@ -5,9 +5,10 @@
 
 权威边界是：
 
-- JetStream 上的入站 JSON（NPC 侧订阅）
-- JetStream 上的 Lucy machine events（NPC 侧发布）
-- JetStream Object Store 中的媒体对象
+- JetStream 上的入站 JSON（`cephalon.im.npc.<user_id>.<cdi>`，NPC 侧 pull consumer 订阅）
+- JetStream 上的 Lucy machine events（`cephalon.im.user.<user_id>`，NPC 侧 `js.publish` 发布；App 侧由 `lucy-im-sdk-kotlin` 通过 IM_USER JetStream consumer 消费）
+- Iroh Blob 上的媒体字节（App 与 NPC 两端本地跑 `lucy-blob` native 模块，通过 P2P blob ref 互相抓取；消息 JSON 里只带 `blob_ref`，不带字节）
+- Core NATS 上的 presence / heartbeat / discover（SDK 内部自动处理，App 通常不关心）
 
 不要把 OpenClaw 内部 session transcript、模型 provider 原始响应或历史 debug 日志当成对外协议。
 
@@ -102,18 +103,20 @@ subscribe = cephalon.im.npc.<user_id>.<cdi>
 publish   = cephalon.im.user.<user_id>
 ```
 
-JetStream 配置：
+JetStream 配置（NPC 侧 pull consumer，`lucy-im-sdk-nodejs` 自动创建）：
 
 - Stream: `IM_NPC`（`kind=lucy`），`IM_NAS`（`kind=nas`）
 - Durable consumer: `npc-<cdi>`（`kind=lucy`），`nas-<cdi>`（`kind=nas`）
 - Ack policy: Explicit，ack_wait = 180s
-- Deliver policy: StartTime（UTC now - 24h）
+- Deliver policy: **`New`**（新 durable 只消费创建之后到达的消息；已存在的 durable 由 ack floor 决定回放位置，首次 create 之后的 deliver_policy 不再生效）
 - Replay policy: Instant
 
 方向约定：
 
-- App -> Lucy：向 NPC subscribe subject 对应的 JetStream stream 发布入站 JSON
-- Lucy -> App：向 publish subject 发布 machine events
+- **App → NPC**：App 的 `lucy-im-sdk-kotlin` 用 `js.publish` 把入站 JSON 写入 `cephalon.im.npc.<user_id>.<cdi>`（后端绑定到 `IM_NPC` 流），NPC 侧 pull consumer 拉取并处理
+- **NPC → App**：NPC 的 `lucy-im-sdk-nodejs` 用 `js.publish` 把 machine event 写入 `cephalon.im.user.<user_id>`（后端绑定到 `IM_USER` 流），App 通过自己的 JetStream consumer 消费
+
+App 侧重启或短暂离线时，只要 JetStream 保留窗口内的消息尚未过期，新建 consumer 仍会补发 —— 相比 core NATS 订阅有明显优势，避免掉事件。
 
 ### Presence（SDK 内部处理）
 
@@ -178,14 +181,13 @@ Heartbeat 消息格式（发到 `client.status.report`）：
   "messageId": "1773582494346106546",
   "text": "describe this image",
   "media": {
-    "transport": "jetstream-object-store",
-    "bucket": "lucy_media_v2",
-    "key": "inbound/cuk_demo_user/2031655882831360000/1773582494346106546-photo.png",
+    "transport": "iroh-blob",
+    "blob_ref": "nodeticket:aeat...",
     "kind": "image",
     "contentType": "image/png",
     "size": 104857,
     "fileName": "photo.png",
-    "sha256": "0f4c2b..."
+    "fileHash": "blake3:0f4c2b..."
   },
   "timestamp": 1773582494347
 }
@@ -385,26 +387,34 @@ Lucy 除了回复用户输入外，也可以主动推送没有 `sourceMessageId`
 
 不要把这组本地通知元数据改回嵌套对象。当前 iOS `LucyMachineEvent` 会把 `metadata` 直接解成 `[String: String]?`，嵌套 JSON 会导致整条 machine event 解码失败。
 
-## 7. 媒体上传 / 下载
+## 7. 媒体上传 / 下载（Iroh Blob）
 
-Lucy 不在入站消息中携带媒体字节本体。正确顺序是：
+Lucy 不在消息 JSON 中携带媒体字节本体。当前走的是 **Iroh Blob P2P**（`lucy-im-sdk` 内置的 `lucy-blob` native 模块）：发送端把本地字节喂给 `blobPut()`，拿到 `blob_ref`（ticket 字符串）和 `fileHash`；接收端收到 descriptor 后用 `blobFetch(blob_ref)` 直接从对端拉取。Iroh session 期间 blob 才可达，发送端调用 `session.close()` 或进程退出后，对应 ref 立即失效，所以通常由一条消息的生命周期决定。
 
-1. App 先把文件上传到 JetStream Object Store
-2. App 在入站 JSON 的 `media` 字段里携带 descriptor
-3. Lucy 下载对象并注入 OpenClaw inbound context
+### 上行（App → NPC）
 
-descriptor 定义：
+1. App 本地调 `blobPut(bytes, fileName)` → `{blobRef, fileHash}`
+2. App publish 入站 JSON，在 `media` 字段里带 `{transport:"iroh-blob", blob_ref, fileHash, kind, size, ...}`
+3. NPC 收到 inbound 后立刻 `blobFetch(blob_ref)` 把字节拉下来注入 OpenClaw inbound context
+4. App 可以在收到 `inbound.accepted`（或更保守一点，收到 `assistant.start` / `assistant.final`）之后释放 blob session
+
+### 下行（NPC → App）
+
+1. agent 用 `message` 工具发送本地文件时，NPC 在本地 `blobPut` 后把 `blob_ref` 写进 `assistant.final` 的 `media` 字段
+2. App 收到后调 `blobFetch(blob_ref)` 把字节取回本地缓存
+3. NPC 会在发送完成后一段时间保持 blob session 开启；App 应尽快抓取
+
+### descriptor 定义
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `transport` | 是 | 固定为 `jetstream-object-store` |
-| `bucket` | 是 | Object Store bucket，默认 `lucy_media_v2` |
-| `key` | 是 | 对象 key |
+| `transport` | 是 | 固定为 `iroh-blob` |
+| `blob_ref` | 是 | Iroh ticket 字符串，任意长度 |
 | `kind` | 是 | `image` 或 `audio` |
 | `contentType` | 否 | MIME 类型 |
-| `size` | 是 | 字节数 |
+| `size` | 是 | 字节数，客户端 `blobFetch` 后应校验 |
 | `fileName` | 否 | 原始文件名 |
-| `sha256` | 否 | 内容校验 |
+| `fileHash` | 否 | 如 `blake3:...`，用于可选内容校验 |
 
 ## 8. 调试边界
 

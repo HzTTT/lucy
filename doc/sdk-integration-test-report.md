@@ -129,6 +129,9 @@ Publish:   cephalon.im.user.<user_id> (JetStream)
 | `device_type` 字段 | `http.ts` | lucy-server 要求 `device_type`（不是 `kind`） |
 | `ts` 类型 | `http.ts` | lucy-server 要求 `ts` 为 string |
 | `checkAPI: false` | `natsConn.ts` | auth-callout 权限不含 `$JS.API.INFO`，跳过前置检查 |
-| `ensureConsumer` 不 update | `natsConn.ts` | JetStream 不允许修改 consumer 的 `opt_start_time` |
-| `child_process` 移除 | `lucy-blob-node-native/index.js` | NAPI-RS Node 10 兼容代码被安全扫描拦截 |
-| gateway 阻塞等待 | `gateway.ts` | `subscribeChannel` 后加 `abortSignal` 等待，防止函数提前返回 |
+| `ensureConsumer` 不 update | `natsConn.ts` | JetStream 不允许修改已有 consumer 的 `opt_start_time` 等字段 |
+| `DeliverPolicy.New` | `jetstreamConfig.ts` | 取代旧的 `StartTime + now - 24h`；新 durable 只消费创建之后到达的消息，避免首次启动回放 24 小时积压 |
+| `probeAccount` 只读 | `src/channel.ts` | 原实现每次 probe 都 `connectLucySdk`（换 token + 建 NATS + 起 presence），以 ~1 Hz 被 health-monitor 轮询后破坏主订阅；改成只读 `homeDir/channel_ids/` 文件 |
+| `child_process` 移除 | `lucy-blob-node-native/index.js` | NAPI-RS Node 10 兼容代码被 OpenClaw 插件安全扫描拦截 |
+| gateway 阻塞等待 | `gateway.ts` | `subscribeChannel` 后加 `abortSignal` 等待，防止函数提前返回触发 channel auto-restart |
+| `sourceMessageId` 关联 | `test/e2e/02-messaging.mjs`, `test/e2e/03-media.mjs` | `sendAndCollect` 按 `evt.sourceMessageId === messageId` 过滤事件；`messageId` 改用时间戳生成保证每次运行唯一，避免抓到前一条消息的回执 |

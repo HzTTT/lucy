@@ -117,7 +117,9 @@ Publish → cephalon.im.npc.<user_id>.<cdi>
 Subscribe ← cephalon.im.user.<user_id>
 ```
 
-可用 Core NATS subscribe 或 JetStream consumer（stream `IM_USER`, durable `user-<user_id>`）。
+**推荐使用 JetStream consumer**（stream `IM_USER`，durable `user-<user_id>`，ack policy `Explicit`），这样 App 短暂离线期间 NPC 推过来的事件会在 JetStream 里暂存并在重连后补发。对不要求离线补发的场景（例如一次性脚本探测）可以临时用 core NATS `nc.subscribe`，但会丢掉订阅窗口之外的事件。
+
+NPC 侧所有 machine event 都是通过 `js.publish` 写进 `cephalon.im.user.<user_id>`，所以 JetStream 消费者一定能看到。App 侧的 `lucy-im-sdk-kotlin` 默认以 JetStream pull consumer 方式消费这条 subject。
 
 ### Presence（NPC 在线状态）
 
@@ -230,14 +232,16 @@ NPC 通过 `cephalon.im.user.<user_id>` 发送 machine events。所有事件都�
   "eventId": "2042541809425543169",
   "type": "assistant.final",
   "timestamp": 1775812920000,
-  "channel_user_key": "1862247176453038080",
-  "channel_device_id": "2042541809425543168",
-  "source_message_id": "1234567890123456789",
-  "run_id": "uuid",
-  "session_key": "agent:main:main",
+  "channelUserKey": "1862247176453038080",
+  "channelDeviceId": "2042541809425543168",
+  "sourceMessageId": "1234567890123456789",
+  "runId": "uuid",
+  "sessionKey": "agent:main:main",
   "text": "你好！有什么可以帮助你的？"
 }
 ```
+
+所有字段都使用 **camelCase**，与 SDK 内 `LucyMachineEventSchema` 对齐。如果看到 `source_message_id` 这样的下划线命名是旧版协议残留，**不要**再按下划线解析。
 
 ### 5.1 事件类型及处理方式
 
@@ -318,21 +322,49 @@ restart.scheduled
 restart.completed
 ```
 
-**主动系统消息（无 source_message_id）：**
+**主动系统消息（无 sourceMessageId）：**
 ```
-assistant.final   "U盘同步完成（/dev/sdb1）"   ← 没有 source_message_id
+assistant.final   "U盘同步完成（/dev/sdb1）"   ← 没有 sourceMessageId
 ```
 
 ### 5.3 关键字段说明
 
 | 字段 | 说明 |
 |------|------|
-| `source_message_id` | 对应 App 发送的 `messageId`，用于关联回复。**主动消息没有此字段** |
-| `run_id` | 同一轮对话的 run 标识，同一条消息可能有多个 run（如工具调用后重新推理） |
-| `session_key` | OpenClaw 的会话标识，格式 `agent:<agentId>:<sessionId>` |
+| `eventId` | 每条 machine event 的唯一 ID（NPC 侧 snowflake 生成），App 应按此做去重 |
+| `sourceMessageId` | 对应 App 发送的 `messageId`，用于关联回复。**主动消息没有此字段** |
+| `runId` | 同一轮 agent 执行内部的 run 标识，同一条输入消息可能触发多个 run（如工具调用后重新推理） |
+| `sessionKey` | OpenClaw 的会话标识，格式 `agent:<agentId>:<sessionId>` |
+| `channelUserKey` / `channelDeviceId` | NPC 路由信息，与 subject 的 `user_id` / `cdi` 对应 |
 | `text` | `assistant.partial` 中是**累积内容**，不是增量。直接用最新的 partial 替换显示 |
-| `media` | 仅在 `assistant.final` 中出现，格式同发送时的 media descriptor |
+| `toolName` | `tool.start` / `tool.end` 中出现，标识具体调用的工具 |
+| `media` | 仅在 `assistant.final` 中出现，格式同发送时的 media descriptor（iroh-blob） |
 | `metadata` | 扩展信息。当前 iOS 按 `[String: String]?` 解码，所以值必须是扁平字符串 |
+
+### 5.2.1 事件关联规则（重要）
+
+App 侧收到事件后**必须按 `sourceMessageId` 过滤**才能把事件归到正确的 pending 请求。`cephalon.im.user.<user_id>` 是这个用户的所有 NPC 回复的单一聚合 subject，可能同时有多条输入在 agent 队列里处理，它们的 event 会交叉到达：
+
+```
+发送 A (messageId=m1) → 发送 B (messageId=m2) → ...
+订阅流里会看到:
+  inbound.accepted  sourceMessageId=m1
+  assistant.start   sourceMessageId=m1  runId=R1
+  inbound.accepted  sourceMessageId=m2   ← m2 的 accepted 先于 m1 的 final 到达
+  assistant.partial sourceMessageId=m1  runId=R1
+  assistant.final   sourceMessageId=m1  runId=R1
+  assistant.start   sourceMessageId=m2  runId=R2
+  ...
+```
+
+正确做法：
+1. 本地维护 `Map<messageId, PendingRequest>`
+2. 每条收到的 event 按 `sourceMessageId` 分发到对应的 PendingRequest
+3. 在某个 PendingRequest 的 `runId` 内部按 event 顺序更新 UI（start → reasoning → tool → partial → final）
+4. 遇到 `assistant.final` 或 `error` 把对应 PendingRequest 标记完成
+5. 没有 `sourceMessageId` 的事件（主动系统消息）单独渲染成主动通知
+
+不要使用"抓到第一条 `assistant.final` 就结束"这种简化逻辑，会在多并发、排队、重试场景下错把别人的回复当成自己的。
 
 ### 5.4 assistant.partial 的处理
 
