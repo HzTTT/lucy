@@ -8,6 +8,10 @@
     "auth-qrcode": "tsx ./scripts/auth-qrcode.ts",
     "test:unit": "vitest run src/*.test.ts",
     "test:presence": "tsx --test src/presence.test.ts",
+    "test:e2e:bind": "node test/e2e/01-bind-flow.mjs",
+    "test:e2e:msg": "node test/e2e/02-messaging.mjs",
+    "test:e2e:media": "node test/e2e/03-media.mjs",
+    "test:e2e": "npm run test:e2e:msg && npm run test:e2e:media",
     "typecheck": "tsc --project tsconfig.json"
   },
   "files": [

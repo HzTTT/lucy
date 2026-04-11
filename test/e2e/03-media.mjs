@@ -83,8 +83,15 @@ const npcSub = "cephalon.im.npc." + userId + "." + cdi;
 const userSub = "cephalon.im.user." + userId;
 console.log("NATS connected\n");
 
-// 收集事件工具函数
-async function collectUntilFinal(timeoutMs = 60000) {
+// 发消息 + 按 sourceMessageId 收集事件。每次调用生成唯一 messageId 避免历史响
+// 应被误认为当前消息的回复。
+let msgIdCounter = 0;
+function freshMessageId() {
+  return `23${Date.now()}${String(msgIdCounter++ % 10000).padStart(4, "0")}`;
+}
+
+async function sendAndCollect(buildPayload, timeoutMs = 180000) {
+  const messageId = freshMessageId();
   const events = [];
   const sub = nc.subscribe(userSub);
   let resolve;
@@ -94,6 +101,9 @@ async function collectUntilFinal(timeoutMs = 60000) {
     for await (const msg of sub) {
       try {
         const evt = JSON.parse(Buffer.from(msg.data).toString("utf8"));
+        if (evt.sourceMessageId && evt.sourceMessageId !== messageId) {
+          continue;
+        }
         events.push(evt);
         if (evt.type === "assistant.final" || evt.type === "error") {
           clearTimeout(timer);
@@ -104,7 +114,15 @@ async function collectUntilFinal(timeoutMs = 60000) {
       } catch {}
     }
   })();
-  return { events, done };
+  // Let the SUB protocol flush before publishing to avoid a race between
+  // subscription registration and fast gateway machine events.
+  await nc.flush();
+  await new Promise(r => setTimeout(r, 200));
+
+  const payload = { version: 2, messageId, timestamp: Date.now(), ...buildPayload(messageId) };
+  await js.publish(npcSub, enc.encode(JSON.stringify(payload)));
+  await done;
+  return events;
 }
 
 // ═══════════════════════════════════════
@@ -112,11 +130,8 @@ async function collectUntilFinal(timeoutMs = 60000) {
 // ═══════════════════════════════════════
 console.log("=== Test 2: App 发图片给 NPC ===");
 const inboundBlob = blobPut(new Uint8Array(testImageData), "photo.png");
-
-const { events: t2Events, done: t2Done } = await collectUntilFinal(60000);
-await js.publish(npcSub, enc.encode(JSON.stringify({
-  version: 2,
-  messageId: "2300000000000000001",
+console.log("  Sending image message, waiting...");
+const t2Events = await sendAndCollect(() => ({
   text: "Describe this image briefly in one sentence.",
   media: {
     transport: "iroh-blob",
@@ -126,10 +141,7 @@ await js.publish(npcSub, enc.encode(JSON.stringify({
     size: testImageData.length,
     fileName: "photo.png",
   },
-  timestamp: Date.now(),
-})));
-console.log("  Sent image message, waiting...");
-await t2Done;
+}));
 inboundBlob.close();
 
 const t2Final = t2Events.find(e => e.type === "assistant.final");
@@ -143,15 +155,10 @@ check("response has text", t2Final?.text?.length > 5, t2Final?.text?.slice(0, 80
 // Test 3: NPC 发图片给 App (outbound)
 // ═══════════════════════════════════════
 console.log("\n=== Test 3: NPC 发图片给 App ===");
-const { events: t3Events, done: t3Done } = await collectUntilFinal(90000);
-await js.publish(npcSub, enc.encode(JSON.stringify({
-  version: 2,
-  messageId: "2300000000000000002",
+console.log("  Asking agent to send image, waiting...");
+const t3Events = await sendAndCollect(() => ({
   text: `Use the message tool to send me the file at ${TEST_IMAGE} as a media attachment. The target is lucy:${userId}`,
-  timestamp: Date.now(),
-})));
-console.log("  Asked agent to send image, waiting...");
-await t3Done;
+}));
 
 const t3Final = t3Events.find(e => e.type === "assistant.final" && e.media);
 const t3AnyFinal = t3Events.find(e => e.type === "assistant.final");

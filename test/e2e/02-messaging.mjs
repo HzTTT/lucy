@@ -47,9 +47,11 @@ function check(label, ok, detail) {
 }
 
 // ── 发消息并收集事件 ──
-let msgIdCounter = 2200000000000000000n;
-async function sendAndCollect(text, timeoutMs = 60000) {
-  const messageId = String(msgIdCounter++);
+let msgIdCounter = 0;
+async function sendAndCollect(text, timeoutMs = 180000) {
+  // Use a timestamp-based messageId so every test run is unique — important
+  // because gateway replays any unacked backlog through the agent.
+  const messageId = `23${Date.now()}${String(msgIdCounter++ % 10000).padStart(4, "0")}`;
   const events = [];
   const sub = nc.subscribe(userSub);
   let resolve;
@@ -60,6 +62,13 @@ async function sendAndCollect(text, timeoutMs = 60000) {
     for await (const msg of sub) {
       try {
         const evt = JSON.parse(Buffer.from(msg.data).toString("utf8"));
+        // Filter events by sourceMessageId so we only see the reply for *this*
+        // publish. Without this filter we would latch onto whatever final
+        // event arrives first on the user subject, which may belong to an
+        // earlier test or a backlog replay.
+        if (evt.sourceMessageId && evt.sourceMessageId !== messageId) {
+          continue;
+        }
         events.push(evt);
         if (evt.type === "assistant.final" || evt.type === "error") {
           clearTimeout(timer);
@@ -70,6 +79,11 @@ async function sendAndCollect(text, timeoutMs = 60000) {
       } catch {}
     }
   })();
+
+  // Give the SUB protocol a moment to flush to the server before publishing,
+  // otherwise fast machine events may race the subscription registration.
+  await nc.flush();
+  await new Promise(r => setTimeout(r, 200));
 
   await js.publish(npcSub, enc.encode(JSON.stringify({ version: 2, messageId, text, timestamp: Date.now() })));
   await done;
