@@ -146,9 +146,32 @@ NPC 会 reply：
 { "cmd": "report", "report": { "status": "online", "cdi": "..." } }
 ```
 
-## 4. 发送消息格式
+## 4. 消息收发
 
-### 4.1 文本消息
+连接 NATS 后，App 通过 JetStream 与 NPC 交互。每次交互都是一个完整的"发送 → 接收事件流"周期。
+
+NPC 回复统一为 machine event JSON，格式如下：
+
+```json
+{
+  "version": 2,
+  "eventId": "2043591075525193728",
+  "type": "assistant.final",
+  "timestamp": 1776065055148,
+  "channel_user_key": "1862247176453038080",
+  "channel_device_id": "2042541809425543168",
+  "source_message_id": "2300000000000000001",
+  "run_id": "0e564af0-5d79-47a3-93ce-e27cbdf6e00f",
+  "session_key": "agent:main:lucy:direct:1862247176453038080",
+  "text": "Hello! 👋"
+}
+```
+
+线上格式的命名规则：`channel_user_key`、`channel_device_id`、`source_message_id`、`run_id`、`session_key`、`tool_name` 使用 **snake_case**；`eventId`、`version`、`type`、`timestamp`、`text`、`metadata`、`media` 保持原样。SDK 内部 TypeScript 类型 (`LucyMachineEventSchema`) 使用 camelCase，但 App 侧收到的 JSON 是 snake_case。
+
+### 4.1 文本对话
+
+**发送：**
 
 ```json
 {
@@ -167,7 +190,70 @@ NPC 会 reply：
 | `timestamp` | number | 否 | 毫秒时间戳 |
 | `metadata` | object | 否 | 辅助信息，如 `{ "platform": "ios" }` |
 
+**收到的事件流：**
+
+App 会在 `cephalon.im.user.<user_id>` 上依次收到以下 machine events（均携带 `source_message_id` 指回你发的 `messageId`）：
+
+| 事件类型 | 含义 | App 应如何处理 |
+|----------|------|----------------|
+| `inbound.accepted` | NPC 收到了你的消息 | 标记消息为"已送达"，显示加载指示器 |
+| `assistant.start` | 模型开始生成回复 | 显示"正在输入..."状态 |
+| `reasoning.partial` | 模型思考过程（流式） | 可选：显示思考气泡（可折叠） |
+| `reasoning.final` | 模型思考结束 | 可选：收起思考气泡 |
+| `tool.start` | 模型调用了工具 | 显示"正在使用 XX 工具..." |
+| `tool.end` | 工具调用结束 | 隐藏工具状态 |
+| `assistant.partial` | 回复内容（流式，累积） | **实时更新聊天气泡内容** |
+| `assistant.final` | 最终完整回复 | **用此内容替换气泡，标记为完成** |
+| `error` | 处理出错 | 显示错误提示 |
+
+**典型事件序列 — 普通文本回复：**
+```
+inbound.accepted
+assistant.start
+reasoning.final          ← 模型可能跳过推理
+assistant.partial "你"
+assistant.partial "你好"
+assistant.partial "你好！"
+assistant.final   "你好！有什么可以帮助你的？"
+```
+
+**典型事件序列 — 带推理的回复：**
+```
+inbound.accepted
+assistant.start
+reasoning.partial "用户问了..."    ← 思考过程
+reasoning.partial "用户问了...我应该..."
+reasoning.final                   ← 思考结束
+assistant.partial "根据"
+assistant.partial "根据分析"
+...
+assistant.final   "根据分析，答案是 391。"
+```
+
+**典型事件序列 — 带工具调用的回复：**
+```
+inbound.accepted
+assistant.start
+tool.start        { tool_name: "web_search" }
+tool.end          { tool_name: "web_search" }
+assistant.start                               ← 工具结束后重新开始
+assistant.partial "当前时间是"
+...
+assistant.final   "当前时间是 2026-04-10 10:28:44 UTC"
+```
+
+> **`assistant.partial` 是累积的**：`text` 字段是当前完整内容，不是增量 delta。直接用最新 partial 的 `text` 替换聊天气泡即可，不需要自己拼接。
+>
+> ```
+> partial: "你"        ← 显示 "你"
+> partial: "你好"      ← 替换为 "你好"
+> partial: "你好！"    ← 替换为 "你好！"
+> final:   "你好！..."  ← 最终内容，替换气泡
+> ```
+
 ### 4.2 图片/媒体消息
+
+**发送：**
 
 媒体通过 Iroh Blob P2P 传输。发送流程：
 
@@ -201,7 +287,39 @@ NPC 会 reply：
 | `size` | number | 是 | 字节数 |
 | `fileName` | string | 否 | 原始文件名 |
 
+**收到的事件流：**
+
+事件序列与文本消息相同（`inbound.accepted` → ... → `assistant.final`）。如果 NPC 回复也包含图片/文件，`assistant.final` 会带上 `media` 字段：
+
+```json
+{
+  "version": 2,
+  "eventId": "2043590718422151168",
+  "type": "assistant.final",
+  "timestamp": 1776064971127,
+  "channel_user_key": "1862247176453038080",
+  "channel_device_id": "2042541809425543168",
+  "text": "Here's your test image - a 100x100 red square:",
+  "media": {
+    "transport": "iroh-blob",
+    "blob_ref": "blobadrjrapdmk7ie7dq6psiobhexjzkiozkmnkbecpsu4iowutaluno6ajpnb2hi4dthixs65lto4ys2mjoojswyylzfzxdaltjojxwqlldmfxgc4tzfzuxe33ifzwgs3tlfyxqiadrlsoo35ohaiahcxe45xsn4aqavqiqaapvy4babqfiaae7lrycaegmgbhmieuot6v3ifzdjdpcrmz5vdnut67kxdy3eoiqnn22sntqq",
+    "kind": "image",
+    "contentType": "image/png",
+    "size": 356,
+    "fileName": "test_square.png"
+  }
+}
+```
+
+> **注意**：带媒体的 `assistant.final` 可能没有 `source_message_id`、`run_id`、`session_key`，取决于 NPC 的处理路径（例如多轮工具调用后生成图片）。App 应容忍这些字段缺失。
+
+App 用 `blobFetch(blob_ref)` 下载文件内容并显示。
+
+> **媒体上传失败处理**：如果 NPC 尝试回复媒体但上传失败，且没有文本内容，App 会收到一条 `error` 事件（`text` 包含失败原因）而不是 `assistant.final`。如果有文本但媒体上传失败，App 会先收到一条 `error` 事件（警告），再收到不带 `media` 的 `assistant.final`。
+
 ### 4.3 模型配置下发
+
+**发送：**
 
 ```json
 {
@@ -220,187 +338,81 @@ NPC 会 reply：
 }
 ```
 
-NPC 收到后会自动写入配置并重启。
+**收到的事件流：**
 
-## 5. 接收 Machine Event（NPC 回复）
+NPC 收到后会自动写入配置并重启，App 依次收到：
 
-NPC 通过 `cephalon.im.user.<user_id>` 发送 machine events。所有事件都是 JSON，统一格式：
-
-```json
-{
-  "version": 2,
-  "eventId": "2042541809425543169",
-  "type": "assistant.final",
-  "timestamp": 1775812920000,
-  "channelUserKey": "1862247176453038080",
-  "channelDeviceId": "2042541809425543168",
-  "sourceMessageId": "1234567890123456789",
-  "runId": "uuid",
-  "sessionKey": "agent:main:main",
-  "text": "你好！有什么可以帮助你的？"
-}
+```
+config.updated           ← NPC 配置已更新，提示"配置已更新"
+restart.scheduled        ← NPC 正在自动重启，显示"设备重启中..."，禁用输入
+    ← NPC 断开 NATS（_discover offline）
+    ← NPC 重连 NATS（_discover online）
+restart.completed        ← NPC 重启完成，恢复输入，显示"设备已上线"
 ```
 
-所有字段都使用 **camelCase**，与 SDK 内 `LucyMachineEventSchema` 对齐。如果看到 `source_message_id` 这样的下划线命名是旧版协议残留，**不要**再按下划线解析。
+如果配置更新失败，会收到 `config.error` 事件。
 
-### 5.1 事件类型及处理方式
+### 4.4 事件关联规则（重要）
 
-#### 消息生命周期事件（按顺序）
+App 侧收到事件后**必须按 `source_message_id` 过滤**才能把事件归到正确的 pending 请求。`cephalon.im.user.<user_id>` 是这个用户的所有 NPC 回复的单一聚合 subject，可能同时有多条输入在 agent 队列里处理，它们的 event 会交叉到达：
 
-| 事件类型 | 含义 | App 应如何处理 |
-|----------|------|----------------|
-| `inbound.accepted` | NPC 收到了你的消息 | 标记消息为"已送达"，显示加载指示器 |
-| `assistant.start` | 模型开始生成回复 | 显示"正在输入..."状态 |
-| `reasoning.partial` | 模型思考过程（流式） | 可选：显示思考气泡（可折叠） |
-| `reasoning.final` | 模型思考结束 | 可选：收起思考气泡 |
-| `tool.start` | 模型调用了工具 | 显示"正在使用 XX 工具..." |
-| `tool.end` | 工具调用结束 | 隐藏工具状态 |
-| `assistant.partial` | 回复内容（流式，累积） | **实时更新聊天气泡内容** |
-| `assistant.final` | 最终完整回复 | **用此内容替换气泡，标记为完成** |
-| `error` | 处理出错 | 显示错误提示 |
+```
+发送 A (messageId=m1) → 发送 B (messageId=m2) → ...
+订阅流里会看到:
+  inbound.accepted  source_message_id=m1
+  assistant.start   source_message_id=m1  run_id=R1
+  inbound.accepted  source_message_id=m2   ← m2 的 accepted 先于 m1 的 final 到达
+  assistant.partial source_message_id=m1  run_id=R1
+  assistant.final   source_message_id=m1  run_id=R1
+  assistant.start   source_message_id=m2  run_id=R2
+  ...
+```
 
-#### 配置与重启事件
+正确做法：
+1. 本地维护 `Map<messageId, PendingRequest>`
+2. 每条收到的 event 按 `source_message_id` 分发到对应的 PendingRequest
+3. 在某个 PendingRequest 的 `run_id` 内部按 event 顺序更新 UI（start → reasoning → tool → partial → final）
+4. 遇到 `assistant.final` 或 `error` 把对应 PendingRequest 标记完成
+5. 没有 `source_message_id` 的事件（主动系统消息）单独渲染成主动通知
 
-| 事件类型 | 含义 | App 应如何处理 |
-|----------|------|----------------|
-| `config.updated` | NPC 配置已更新 | 提示"配置已更新" |
-| `config.error` | 配置更新失败 | 显示错误 |
-| `restart.scheduled` | NPC 正在自动重启 | 显示"设备重启中..."，禁用输入 |
-| `restart.completed` | NPC 重启完成 | 恢复输入，显示"设备已上线" |
+不要使用"抓到第一条 `assistant.final` 就结束"这种简化逻辑，会在多并发、排队、重试场景下错把别人的回复当成自己的。
 
-#### 审批事件（可选）
+### 4.5 关键字段说明
+
+| 字段 | 说明 |
+|------|------|
+| `eventId` | 每条 machine event 的唯一 ID（NPC 侧 snowflake 生成），App 应按此做去重 |
+| `source_message_id` | 对应 App 发送的 `messageId`，用于关联回复。**主动消息没有此字段** |
+| `run_id` | 同一轮 agent 执行内部的 run 标识，同一条输入消息可能触发多个 run（如工具调用后重新推理） |
+| `session_key` | OpenClaw 的会话标识，格式 `agent:<agentId>:<sessionId>` |
+| `channel_user_key` / `channel_device_id` | NPC 路由信息，与 subject 的 `user_id` / `cdi` 对应 |
+| `text` | `assistant.partial` 中是**累积内容**，不是增量。直接用最新的 partial 替换显示 |
+| `tool_name` | `tool.start` / `tool.end` 中出现，标识具体调用的工具 |
+| `media` | 仅在 `assistant.final` 中出现，格式同发送时的 media descriptor（iroh-blob） |
+| `metadata` | 扩展信息。当前 iOS 按 `[String: String]?` 解码，所以值必须是扁平字符串 |
+
+### 4.6 主动系统消息与审批事件
+
+以下事件**没有对应的 App 发送动作**，是 NPC 主动推送的：
+
+**主动系统消息：**
+
+NPC 可以主动推送通知，这些事件**没有 `source_message_id`**：
+
+```
+assistant.final   "U盘同步完成（/dev/sdb1）"   ← 没有 source_message_id
+```
+
+App 应将此类事件单独渲染为系统通知，不要尝试关联到某条已发送的消息。
+
+**审批事件（可选）：**
 
 | 事件类型 | 含义 |
 |----------|------|
 | `approval.pending` | NPC 请求用户审批执行某个操作 |
 | `approval.resolved` | 审批已处理 |
 
-### 5.2 典型事件序列
-
-**普通文本回复：**
-```
-inbound.accepted
-assistant.start
-reasoning.final          ← 模型可能跳过推理
-assistant.partial "你"
-assistant.partial "你好"
-assistant.partial "你好！"
-assistant.final   "你好！有什么可以帮助你的？"
-```
-
-**带推理的回复：**
-```
-inbound.accepted
-assistant.start
-reasoning.partial "用户问了..."    ← 思考过程
-reasoning.partial "用户问了...我应该..."
-reasoning.final                   ← 思考结束
-assistant.partial "根据"
-assistant.partial "根据分析"
-...
-assistant.final   "根据分析，答案是 391。"
-```
-
-**带工具调用的回复：**
-```
-inbound.accepted
-assistant.start
-tool.start        { tool_name: "web_search" }
-tool.end          { tool_name: "web_search" }
-assistant.start                               ← 工具结束后重新开始
-assistant.partial "当前时间是"
-...
-assistant.final   "当前时间是 2026-04-10 10:28:44 UTC"
-```
-
-**模型配置下发后：**
-```
-config.updated
-restart.scheduled
-    ← NPC 断开 NATS（_discover offline）
-    ← NPC 重连 NATS（_discover online）
-restart.completed
-```
-
-**主动系统消息（无 sourceMessageId）：**
-```
-assistant.final   "U盘同步完成（/dev/sdb1）"   ← 没有 sourceMessageId
-```
-
-### 5.3 关键字段说明
-
-| 字段 | 说明 |
-|------|------|
-| `eventId` | 每条 machine event 的唯一 ID（NPC 侧 snowflake 生成），App 应按此做去重 |
-| `sourceMessageId` | 对应 App 发送的 `messageId`，用于关联回复。**主动消息没有此字段** |
-| `runId` | 同一轮 agent 执行内部的 run 标识，同一条输入消息可能触发多个 run（如工具调用后重新推理） |
-| `sessionKey` | OpenClaw 的会话标识，格式 `agent:<agentId>:<sessionId>` |
-| `channelUserKey` / `channelDeviceId` | NPC 路由信息，与 subject 的 `user_id` / `cdi` 对应 |
-| `text` | `assistant.partial` 中是**累积内容**，不是增量。直接用最新的 partial 替换显示 |
-| `toolName` | `tool.start` / `tool.end` 中出现，标识具体调用的工具 |
-| `media` | 仅在 `assistant.final` 中出现，格式同发送时的 media descriptor（iroh-blob） |
-| `metadata` | 扩展信息。当前 iOS 按 `[String: String]?` 解码，所以值必须是扁平字符串 |
-
-### 5.2.1 事件关联规则（重要）
-
-App 侧收到事件后**必须按 `sourceMessageId` 过滤**才能把事件归到正确的 pending 请求。`cephalon.im.user.<user_id>` 是这个用户的所有 NPC 回复的单一聚合 subject，可能同时有多条输入在 agent 队列里处理，它们的 event 会交叉到达：
-
-```
-发送 A (messageId=m1) → 发送 B (messageId=m2) → ...
-订阅流里会看到:
-  inbound.accepted  sourceMessageId=m1
-  assistant.start   sourceMessageId=m1  runId=R1
-  inbound.accepted  sourceMessageId=m2   ← m2 的 accepted 先于 m1 的 final 到达
-  assistant.partial sourceMessageId=m1  runId=R1
-  assistant.final   sourceMessageId=m1  runId=R1
-  assistant.start   sourceMessageId=m2  runId=R2
-  ...
-```
-
-正确做法：
-1. 本地维护 `Map<messageId, PendingRequest>`
-2. 每条收到的 event 按 `sourceMessageId` 分发到对应的 PendingRequest
-3. 在某个 PendingRequest 的 `runId` 内部按 event 顺序更新 UI（start → reasoning → tool → partial → final）
-4. 遇到 `assistant.final` 或 `error` 把对应 PendingRequest 标记完成
-5. 没有 `sourceMessageId` 的事件（主动系统消息）单独渲染成主动通知
-
-不要使用"抓到第一条 `assistant.final` 就结束"这种简化逻辑，会在多并发、排队、重试场景下错把别人的回复当成自己的。
-
-### 5.4 assistant.partial 的处理
-
-`assistant.partial` 的 `text` 是**累积的完整文本**，不是增量 delta。
-
-```
-partial: "你"        ← 显示 "你"
-partial: "你好"      ← 替换为 "你好"
-partial: "你好！"    ← 替换为 "你好！"
-final:   "你好！..."  ← 最终内容，替换气泡
-```
-
-App 应该直接用最新 partial 的 `text` 替换聊天气泡，不需要自己做拼接。
-
-### 5.5 assistant.final 带媒体
-
-如果 NPC 回复包含图片/文件：
-
-```json
-{
-  "type": "assistant.final",
-  "text": "这是生成的图片",
-  "media": {
-    "transport": "iroh-blob",
-    "blob_ref": "blobxxx...",
-    "kind": "image",
-    "contentType": "image/png",
-    "size": 204800,
-    "fileName": "output.png"
-  }
-}
-```
-
-App 用 `blobFetch(blob_ref)` 下载文件内容并显示。
-
-## 6. 错误处理
+## 5. 错误处理
 
 ### NPC 离线
 
@@ -420,7 +432,7 @@ App 用 `blobFetch(blob_ref)` 下载文件内容并显示。
 - iOS 客户端按 `[String: String]?` 解码，嵌套对象会导致整条事件解码失败
 - 如果遇到解码错误，先检查 `metadata` 是否有非 string 值
 
-## 7. 环境配置
+## 6. 环境配置
 
 | 变量 | test 环境 |
 |------|-----------|
@@ -430,7 +442,7 @@ App 用 `blobFetch(blob_ref)` 下载文件内容并显示。
 
 `base_url`（模型 API）由 `model-config` 接口返回，**不要硬编码**。
 
-## 8. 快速验证步骤
+## 7. 快速验证步骤
 
 1. 调 `/v1/login` 登录
 2. 调 `/v1/channels/lucy/nats/token/user` 获取 NATS token
