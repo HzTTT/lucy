@@ -593,6 +593,10 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
       log: ctx.log,
       waitForBinding: true,
       onPendingBind: (sdkClient) => {
+        // Write pairing-info.json early so blue-wifi can expose the cdi
+        // via BLE before binding completes.
+        syncLucyPairingExport(ctx.account.homeDir).catch(() => {});
+
         if (!ctx.account.pairingSocket) {
           ctx.log?.info?.(
             "[lucy] pairing IPC disabled (channels.lucy.pairingSocket is not set)",
