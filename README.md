@@ -27,7 +27,6 @@ SDK 工作目录默认为 `~/data/lucy_im/`，存放密钥对和绑定标识。
 ```bash
 openclaw plugins install @hzttt/lucy
 openclaw config set channels.lucy.enabled true
-openclaw config set channels.lucy.servers '["nats://chat.lucy.run:4222"]' --strict-json
 ```
 
 配置完成后，运行：
@@ -59,9 +58,10 @@ openclaw lucy auth-qrcode
 
 1. 用 `openclaw plugins install @hzttt/lucy` 安装插件。
 2. 打开 `channels.lucy.enabled`。
-3. 用严格 JSON 写入 `channels.lucy.servers`。这一步必须带 `--strict-json`，因为 `servers` 是数组。
-4. 执行 `openclaw lucy auth-qrcode`，在 Lucy App 中扫码完成绑定。
-5. 绑定完成后，Lucy App 可继续拉取 `GET /v1/channels/lucy/current-user/model-config`，并把模型配置下发到设备。
+3. 执行 `openclaw lucy auth-qrcode`，在 Lucy App 中扫码完成绑定。
+4. 绑定完成后，Lucy App 可继续拉取 `GET /v1/channels/lucy/current-user/model-config`，并把模型配置下发到设备。
+
+NATS 服务器地址由 token 接口动态返回，无需手动配置。
 6. 设备自动重启并恢复上线后，再从 Lucy App 发消息验证链路。
 
 ## 推荐配置
@@ -72,12 +72,13 @@ openclaw lucy auth-qrcode
 {
   "channels": {
     "lucy": {
-      "enabled": true,
-      "servers": ["nats://chat.lucy.run:4222"]
+      "enabled": true
     }
   }
 }
 ```
+
+NATS 服务器地址由 `lucy-server` 的 token 接口动态返回（`nats_url` 字段），无需在配置中硬编码。
 
 如果你要把本机的 USB 同步 daemon 事件回报给 Lucy，可以额外开启一个本地 HTTP 通知入口：
 
@@ -86,7 +87,6 @@ openclaw lucy auth-qrcode
   "channels": {
     "lucy": {
       "enabled": true,
-      "servers": ["nats://chat.lucy.run:4222"],
       "localNotify": {
         "enabled": true,
         "bind": "127.0.0.1",
@@ -111,6 +111,34 @@ daemon 侧把：
 指向 Lucy 即可。
 
 如果你把 `localNotify.port` 或 `localNotify.path` 改成别的值，daemon 侧的 `notify.url` 也必须同步调整；Lucy 不会帮你做端口映射或 URL 兼容。
+
+### `kind` / `device_type`
+
+`channels.lucy.kind` 控制设备类型标识，默认 `"lucy"`。这个值会影响：
+
+- NATS token 请求中的 `device_type` 字段和签名参数 `kind`，lucy-server 据此分配不同的 NATS 权限
+- JetStream 的 stream 名称和 durable consumer 名称（`nas` 使用独立的 stream 和 consumer）
+
+可选值：
+
+| 值 | 说明 |
+|----|------|
+| `"lucy"` | 默认，标准 Lucy 设备 |
+| `"nas"` | NAS 设备，使用独立的 JetStream stream |
+| 自定义字符串 | 按需扩展，需 lucy-server 侧同步支持 |
+
+标准接入不需要改这个字段。只有在部署 NAS 或其他非标准设备类型时才需要设置：
+
+```json5
+{
+  "channels": {
+    "lucy": {
+      "enabled": true,
+      "kind": "nas"
+    }
+  }
+}
+```
 
 Lucy 会通过 SDK 自动处理以下状态，不需要手工写入：
 
