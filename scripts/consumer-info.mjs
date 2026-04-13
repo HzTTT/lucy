@@ -3,7 +3,7 @@ import path from "node:path";
 
 const UC = "https://test.unicorn.org.cn/cephalon/user-center";
 const LS = "https://test.unicorn.org.cn/aiden/lucy-server";
-const home = "/tmp/lucy-client-home/data/lucy_im";
+const home = "/tmp/lucy-test/identity";
 const cdi = (await fs.readFile(path.join(home, "channel_ids/cdi"), "utf8")).trim();
 
 const login = await (await fetch(UC + "/v1/login", {

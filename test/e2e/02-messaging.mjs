@@ -16,7 +16,7 @@ const LS = "https://test.unicorn.org.cn/aiden/lucy-server";
 const PHONE = "18888888888";
 const PWD = "cephalon.boss";
 
-const home = (process.env.HOME || "/home/cephalon") + "/data/lucy_im";
+const home = process.env.LUCY_HOME || "/var/lib/lucy/identity";
 const cdi = (await fs.readFile(path.join(home, "channel_ids/cdi"), "utf8")).trim();
 const userId = (await fs.readFile(path.join(home, "channel_ids/user_id"), "utf8")).trim();
 

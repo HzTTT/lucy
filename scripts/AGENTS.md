@@ -38,6 +38,6 @@ This directory contains debugging, testing, and diagnostic scripts for the Lucy 
 
 ### Modification rules
 
-- All probe scripts read credentials from `/tmp/lucy-client-home/data/lucy_im/channel_ids/`. Do not hardcode `cdi`, `user_id`, or `cuk` values.
+- All probe scripts read credentials from `/tmp/lucy-test/identity/channel_ids/`. Do not hardcode `cdi`, `user_id`, or `cuk` values.
 - `demo-chat.ts` and `raw-event-probe.mjs` use direct NATS user/pass authentication. The probe scripts (`e2e-probe.mjs`, `correlation-probe.mjs`, `consumer-info.mjs`) use user-center login + lucy-server token exchange. Keep these two auth paths consistent when modifying.
 - NATS subject format: `cephalon.im.npc.<user_id>.<cdi>` (inbound to NPC), `cephalon.im.user.<user_id>` (outbound from NPC). Do not change without updating both probe scripts and `src/gateway.ts`.

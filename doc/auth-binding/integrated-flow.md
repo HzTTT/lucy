@@ -244,12 +244,12 @@ sequenceDiagram
 - NATS 连接不再使用 username/password，而是通过签名换取的短期 token
 - 消息收发使用 JetStream（可靠投递），不再使用 Core NATS 订阅
 - Presence（上下线、heartbeat、ping reply）由 SDK 内部处理，应用层不需要额外逻辑
-- SDK 工作目录默认为 `~/data/lucy_im/`
+- SDK 工作目录默认为 `/var/lib/lucy/identity/`
 
 ## 6. SDK 存储布局
 
 ```
-~/data/lucy_im/
+/var/lib/lucy/identity/
 ├── bootstrap_token/
 │   ├── id_ed25519          # Ed25519 私钥 (PKCS#8 PEM)
 │   └── id_ed25519.pub      # 32 字节公钥 (Base64)

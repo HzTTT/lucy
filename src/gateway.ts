@@ -15,9 +15,33 @@ import {
 // (older openclaw versions may not have gateway-runtime / infra-runtime)
 let _approvalHandler: unknown = null;
 let _loadAttempted = false;
+
+// Active long-lived Lucy session, published by startLucyGateway so that other
+// code paths (e.g. outbound.sendText in channel.ts, exec approval handler) can
+// reuse the same NATS connection instead of opening a fresh one per call.
+// Keyed by accountId so multi-account configs don't collide.
+interface LucyActiveSession {
+  accountId: string;
+  session: ConnectedClient;
+  cdi: string;
+  userId: string;
+  cuk: string;
+}
+const lucyActiveSessions = new Map<string, LucyActiveSession>();
+
+export function getLucyActiveSession(
+  accountId: string,
+): LucyActiveSession | undefined {
+  return lucyActiveSessions.get(accountId);
+}
+
 import { syncLucyBindingWithSdk, connectLucySdk } from "./auth-binding.js";
 import { buildLucyImConfig } from "./config.js";
 import { buildNpcSubscribeSubject } from "./nats.js";
+import {
+  startPairingIpcClient,
+  type PairingIpcClientHandle,
+} from "./pairing-ipc-client.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { syncLucyPairingExport } from "./pairing-export.js";
@@ -554,16 +578,69 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
 
   const sdkCfg = buildLucyImConfig(ctx.account);
 
-  // Sync binding — waits until bound
-  await syncLucyBindingWithSdk({
-    cfg: sdkCfg,
-    signal: ctx.abortSignal,
-    log: ctx.log,
-    waitForBinding: true,
-  });
+  // Sync binding — waits until bound. When entering PendingBind state, stand
+  // up the pairing IPC client if the account has one configured so the
+  // blue-wifi BLE agent can trigger on-demand preBind() calls (and receive
+  // the resulting OTP) while this function is polling for binding completion.
+  //
+  // The handle lives inside a ref object so TS's control-flow narrowing
+  // tracks it correctly across the onPendingBind closure boundary.
+  const pairingIpcRef: { handle: PairingIpcClientHandle | null } = { handle: null };
+  try {
+    await syncLucyBindingWithSdk({
+      cfg: sdkCfg,
+      signal: ctx.abortSignal,
+      log: ctx.log,
+      waitForBinding: true,
+      onPendingBind: (sdkClient) => {
+        if (!ctx.account.pairingSocket) {
+          ctx.log?.info?.(
+            "[lucy] pairing IPC disabled (channels.lucy.pairingSocket is not set)",
+          );
+          return;
+        }
+        ctx.log?.info?.(
+          `[lucy] pairing IPC: connecting to ${ctx.account.pairingSocket}`,
+        );
+        pairingIpcRef.handle = startPairingIpcClient({
+          sockPath: ctx.account.pairingSocket,
+          signal: ctx.abortSignal,
+          client: sdkClient,
+          log: ctx.log,
+        });
+      },
+    });
+  } catch (err) {
+    if (pairingIpcRef.handle) {
+      await pairingIpcRef.handle.stop().catch(() => undefined);
+    }
+    throw err;
+  }
 
   // Connect to NATS via SDK
-  const { client: session, cdi, userId, cuk } = await connectLucySdk({ cfg: sdkCfg });
+  let { client: session, cdi, userId, cuk } = await connectLucySdk({ cfg: sdkCfg });
+
+  // Tell blue-wifi that binding is done so it can clear its OTP exposure,
+  // then close the IPC channel — it is only useful during PendingBind.
+  // NOTE: the write is best-effort. If the IPC is currently reconnecting
+  // (e.g. blue-wifi restarted between pollBinding cycles), the bind.completed
+  // frame is dropped and blue-wifi falls back on the OTP expires_at_ms guard
+  // it already tracks locally to clean up stale state.
+  if (pairingIpcRef.handle) {
+    pairingIpcRef.handle.publishBindCompleted({ cuk, userId });
+    await pairingIpcRef.handle.stop().catch(() => undefined);
+    pairingIpcRef.handle = null;
+  }
+
+  // Publish the long-lived session so outbound send paths can reuse it instead
+  // of opening a fresh NATS connection per outbound message.
+  lucyActiveSessions.set(ctx.account.accountId, {
+    accountId: ctx.account.accountId,
+    session,
+    cdi,
+    userId,
+    cuk,
+  });
 
   // Sync pairing export with SDK home dir
   await syncLucyPairingExport(ctx.account.homeDir).catch(() => {
@@ -578,6 +655,7 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
       return;
     }
     stopped = true;
+    lucyActiveSessions.delete(ctx.account.accountId);
     (_approvalHandler as { stop?: () => void } | null)?.stop?.();
     void localNotifyServer?.stop().catch((err) => {
       ctx.log?.warn?.(`[lucy] local notify shutdown failed: ${String(err)}`);
@@ -661,7 +739,40 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
     `[lucy] listening on ${subscribeSubject} and publishing to ${publishSubject}`,
   );
 
-  try {
+  // ── Self-healing connection loop ──────────────────────────────────
+  // Three recovery layers, each progressively heavier:
+  //   Layer 1 (SDK):     handles transient NATS blips — 10 reconnects
+  //                      with exponential backoff 2 s → 60 s, fresh
+  //                      token each attempt. Fully internal to the SDK.
+  //   Layer 2 (gateway): when the SDK exhausts reconnects, rebuild the
+  //                      entire SDK session from scratch with longer
+  //                      intervals. Unlimited retries, capped at 5 min.
+  //   Layer 3 (OpenClaw): if startLucyGateway throws, the framework's
+  //                      auto-restart kicks in as a last resort.
+
+  const HEAL_BASE_DELAY_MS = 30_000;
+  const HEAL_MAX_DELAY_MS = 300_000;
+
+  /** Sleep that resolves `true` normally, or `false` when aborted. */
+  const sleepOrAbort = (ms: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (ctx.abortSignal.aborted) {
+        resolve(false);
+        return;
+      }
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve(false);
+      };
+      const timer = setTimeout(() => {
+        ctx.abortSignal.removeEventListener("abort", onAbort);
+        resolve(true);
+      }, ms);
+      ctx.abortSignal.addEventListener("abort", onAbort, { once: true });
+    });
+
+  /** Subscribe to the inbound JetStream subject on the current session. */
+  const subscribeInbound = async () => {
     await session.subscribeChannel(subscribeSubject, async (msg: JetStreamMessage) => {
       if (stopped) return;
       try {
@@ -697,16 +808,91 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
         });
       }
     });
+  };
 
-    // Block until abortSignal fires — subscribeChannel runs in background,
-    // so we must keep startLucyGateway alive to prevent OpenClaw auto-restart.
-    await new Promise<void>((resolve) => {
-      if (ctx.abortSignal.aborted) {
-        resolve();
-        return;
+  try {
+    await subscribeInbound();
+    let healAttempt = 0;
+
+    while (!stopped && !ctx.abortSignal.aborted) {
+      // Race: normal shutdown (abort) vs SDK connection permanently lost
+      const outcome = await Promise.race([
+        new Promise<"abort">((resolve) => {
+          if (ctx.abortSignal.aborted) {
+            resolve("abort");
+            return;
+          }
+          ctx.abortSignal.addEventListener("abort", () => resolve("abort"), {
+            once: true,
+          });
+        }),
+        session.connectionLost.then((reason: string) => reason),
+      ]);
+
+      if (outcome === "abort") {
+        break;
       }
-      ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
-    });
+
+      // ── Layer 2: gateway-level self-heal ──
+      ctx.log?.warn?.(
+        `[lucy] NATS connection permanently lost: ${outcome}; starting gateway-level heal`,
+      );
+      updateLucyStatus(ctx, {
+        running: false,
+        lastError: `connection lost: ${outcome}`,
+      });
+      await session.shutdown().catch(() => {});
+
+      let healed = false;
+      while (!ctx.abortSignal.aborted) {
+        healAttempt++;
+        const delay = Math.min(
+          HEAL_BASE_DELAY_MS * 2 ** Math.min(healAttempt - 1, 10),
+          HEAL_MAX_DELAY_MS,
+        );
+        ctx.log?.info?.(
+          `[lucy] gateway heal attempt ${healAttempt} in ${Math.round(delay / 1000)}s`,
+        );
+
+        if (!(await sleepOrAbort(delay))) {
+          break;
+        }
+
+        try {
+          const reconnected = await connectLucySdk({ cfg: sdkCfg });
+          session = reconnected.client;
+
+          lucyActiveSessions.set(ctx.account.accountId, {
+            accountId: ctx.account.accountId,
+            session,
+            cdi,
+            userId,
+            cuk,
+          });
+
+          await subscribeInbound();
+
+          updateLucyStatus(ctx, {
+            running: true,
+            lastStartAt: Date.now(),
+          });
+          ctx.log?.info?.(
+            `[lucy] healed after ${healAttempt} gateway-level attempt(s)`,
+          );
+          healAttempt = 0;
+          healed = true;
+          break;
+        } catch (err) {
+          ctx.log?.warn?.(
+            `[lucy] gateway heal attempt ${healAttempt} failed: ${String(err)}`,
+          );
+        }
+      }
+
+      if (!healed) {
+        break;
+      }
+    }
   } catch (err) {
     if (!stopped) {
       updateLucyStatus(ctx, {

@@ -21,14 +21,14 @@ const PHONE = "18888888888";
 const PWD = "xxx";
 ```
 
-脚本会从 `$HOME/data/lucy_im/channel_ids/` 读取 `cdi`、`user_id`、`cuk`。可以用 `HOME=` 覆盖到独立目录：
+脚本（02/03）会从 `LUCY_HOME`（默认 `/var/lib/lucy/identity`）读取 `channel_ids/cdi`、`user_id`、`cuk`。可以用 `LUCY_HOME=` 覆盖到独立目录：
 
 ```bash
 # 用临时目录种绑定状态（与远程 NPC 对齐）
-mkdir -p /tmp/lucy-client-home/data/lucy_im/channel_ids
-echo -n "<远程的cdi>" > /tmp/lucy-client-home/data/lucy_im/channel_ids/cdi
-echo -n "<远程的user_id>" > /tmp/lucy-client-home/data/lucy_im/channel_ids/user_id
-echo -n "<远程的cuk>" > /tmp/lucy-client-home/data/lucy_im/channel_ids/cuk
+mkdir -p /tmp/lucy-test/identity/channel_ids
+echo -n "<远程的cdi>" > /tmp/lucy-test/identity/channel_ids/cdi
+echo -n "<远程的user_id>" > /tmp/lucy-test/identity/channel_ids/user_id
+echo -n "<远程的cuk>" > /tmp/lucy-test/identity/channel_ids/cuk
 ```
 
 ## 测试脚本
@@ -45,14 +45,14 @@ echo -n "<远程的cuk>" > /tmp/lucy-client-home/data/lucy_im/channel_ids/cuk
 cd extensions/lucy
 
 # 单独跑
-HOME=/tmp/lucy-client-home npm run test:e2e:msg
-HOME=/tmp/lucy-client-home npm run test:e2e:media
+LUCY_HOME=/tmp/lucy-test/identity npm run test:e2e:msg
+LUCY_HOME=/tmp/lucy-test/identity npm run test:e2e:media
 
 # 连跑 02 + 03
-HOME=/tmp/lucy-client-home npm run test:e2e
+LUCY_HOME=/tmp/lucy-test/identity npm run test:e2e
 
-# 首次绑定（用一份空的 HOME 走完整 bind 流程，与 App 登录后扫码对齐）
-HOME=/tmp/lucy-client-home-fresh npm run test:e2e:bind
+# 首次绑定（用一份空的目录走完整 bind 流程，与 App 登录后扫码对齐）
+npm run test:e2e:bind
 ```
 
 ## 关键原则

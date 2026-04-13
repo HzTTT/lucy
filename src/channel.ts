@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
+import type { ConnectedClient } from "lucy-im-sdk";
 import {
   buildExecApprovalPendingReplyPayload,
   getExecApprovalReplyMetadata,
@@ -11,7 +12,7 @@ import {
 import { syncLucyBindingWithSdk, connectLucySdk } from "./auth-binding.js";
 import { lucyChannelConfigSchema } from "./config-schema.js";
 import { buildLucyImConfig, listLucyAccountIds, resolveLucyAccount, unconfiguredLucyReason } from "./config.js";
-import { startLucyGateway } from "./gateway.js";
+import { getLucyActiveSession, startLucyGateway } from "./gateway.js";
 import { uploadLucyMediaFromSource } from "./media.js";
 import {
   collectStatusIssuesFromLastError,
@@ -54,8 +55,31 @@ async function publishLucyOutboundAssistantFinal(params: {
   const account = resolveLucyAccount(params.cfg, params.accountId);
   const sdkCfg = buildLucyImConfig(account);
 
-  // Connect (will throw if not bound)
-  const { client: session, cdi, userId, cuk } = await connectLucySdk({ cfg: sdkCfg });
+  // Prefer the long-lived session that startLucyGateway stood up. Each
+  // outbound used to open a fresh NATS connection, fetch a new NPC NATS
+  // token, spawn presence/heartbeat, publish once, and shut down again —
+  // that produced constant fetch_nats_token_npc and _discover churn on
+  // every tool-triggered send. Only fall back to a fresh connect if the
+  // gateway has not started yet (e.g. delivery-recovery on boot).
+  const active = getLucyActiveSession(account.accountId);
+  let session: ConnectedClient;
+  let cdi: string;
+  let userId: string;
+  let cuk: string;
+  let ownsSession = false;
+  if (active) {
+    session = active.session;
+    cdi = active.cdi;
+    userId = active.userId;
+    cuk = active.cuk;
+  } else {
+    const connected = await connectLucySdk({ cfg: sdkCfg });
+    session = connected.client;
+    cdi = connected.cdi;
+    userId = connected.userId;
+    cuk = connected.cuk;
+    ownsSession = true;
+  }
 
   const targetCuk = normalizeLucyOutboundTarget(params.to) || cuk;
   const trimmedText = params.text?.trim() || undefined;
@@ -96,7 +120,9 @@ async function publishLucyOutboundAssistantFinal(params: {
       messageId: event.eventId,
     };
   } finally {
-    await session.shutdown().catch(() => undefined);
+    if (ownsSession) {
+      await session.shutdown().catch(() => undefined);
+    }
   }
 }
 

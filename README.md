@@ -18,7 +18,7 @@ Lucy 使用 `lucy-im-sdk-nodejs`（git submodule `lucy-im-sdk/`）处理：
 - JetStream 消息收发
 - Presence（上下线、heartbeat、ping）
 
-SDK 工作目录默认为 `~/data/lucy_im/`，存放密钥对和绑定标识。
+SDK 工作目录默认为 `/var/lib/lucy/identity/`，存放密钥对和绑定标识。
 
 ## 最小接入
 
@@ -142,10 +142,10 @@ daemon 侧把：
 
 Lucy 会通过 SDK 自动处理以下状态，不需要手工写入：
 
-- Ed25519 密钥对（`~/data/lucy_im/bootstrap_token/`）
-- `cdi`（`~/data/lucy_im/channel_ids/cdi`）
-- `cuk`（`~/data/lucy_im/channel_ids/cuk`）
-- `user_id`（`~/data/lucy_im/channel_ids/user_id`）
+- Ed25519 密钥对（`/var/lib/lucy/identity/bootstrap_token/`）
+- `cdi`（`/var/lib/lucy/identity/channel_ids/cdi`）
+- `cuk`（`/var/lib/lucy/identity/channel_ids/cuk`）
+- `user_id`（`/var/lib/lucy/identity/channel_ids/user_id`）
 
 当 App 下发模型配置时，Lucy 还会自动写入：
 

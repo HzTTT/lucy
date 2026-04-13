@@ -85,6 +85,7 @@ export function resolveLucyAccount(
   const restartHelperArgs = raw.restartHelperArgs?.map((entry) => entry.trim()).filter(Boolean);
   const restartOnlineTimeoutMs = raw.restartOnlineTimeoutMs;
   const allowFrom = raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ?? [];
+  const pairingSocket = raw.pairingSocket?.trim() || undefined;
 
   const configured =
     Boolean(userCenterDomain) &&
@@ -112,6 +113,7 @@ export function resolveLucyAccount(
     restartHelperCommand,
     restartHelperArgs,
     restartOnlineTimeoutMs,
+    pairingSocket,
   };
 }
 

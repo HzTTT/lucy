@@ -1,8 +1,20 @@
 import { LucyImClient, type LucyImConfig } from "lucy-im-sdk";
 import type { ConnectedClient } from "lucy-im-sdk";
 
+/**
+ * Waits until the Lucy device is bound to a user and returns the resolved
+ * identity triple. Polls the device-binding API every 2 seconds until either
+ * the device becomes bound, the supplied abort signal fires, or the optional
+ * deadline elapses. The OTP generation path is no longer driven from inside
+ * this function — on-demand OTP issuance now flows through the pairing IPC
+ * client (see src/pairing-ipc-client.ts), and pollBinding remains the
+ * transport-agnostic fallback that also covers out-of-band binding paths
+ * like QR scanning.
+ */
 export async function syncLucyBindingWithSdk(params: {
   cfg: LucyImConfig;
+  /** Optional pre-constructed client. When omitted a fresh one is created. */
+  client?: LucyImClient;
   signal?: AbortSignal;
   log?: {
     info?: (msg: string) => void;
@@ -10,8 +22,18 @@ export async function syncLucyBindingWithSdk(params: {
     error?: (msg: string) => void;
   };
   waitForBinding: boolean;
+  /**
+   * Invoked once the device is confirmed to be in PendingBind state. The
+   * caller uses this hook to start the pairing IPC client (or any other
+   * binding initiator) before polling begins.
+   */
+  onPendingBind?: (client: LucyImClient) => void;
+  /**
+   * Poll interval in milliseconds. Defaults to 2000; override for tests.
+   */
+  pollIntervalMs?: number;
 }): Promise<{ cdi: string; userId: string; cuk: string }> {
-  const client = new LucyImClient(params.cfg);
+  const client = params.client ?? new LucyImClient(params.cfg);
   const init = await client.init();
 
   if (init.kind === "Ready") {
@@ -28,11 +50,13 @@ export async function syncLucyBindingWithSdk(params: {
     throw new Error("Lucy device not bound and waitForBinding=false");
   }
 
-  const otp = await client.preBind();
-  params.log?.info?.(`[lucy] Binding OTP: ${otp.otp} (expires in ${otp.expires_in}s)`);
+  params.onPendingBind?.(client);
+  params.log?.info?.(
+    `[lucy] device pending bind (cdi=${init.cdi}); waiting for user to complete binding`,
+  );
 
-  const deadline = Date.now() + otp.expires_in * 1000;
-  while (Date.now() < deadline) {
+  const pollIntervalMs = params.pollIntervalMs ?? 2_000;
+  while (true) {
     if (params.signal?.aborted) {
       throw new Error("Lucy binding aborted");
     }
@@ -46,7 +70,7 @@ export async function syncLucyBindingWithSdk(params: {
       const timer = setTimeout(() => {
         params.signal?.removeEventListener("abort", onAbort);
         resolve();
-      }, 2000);
+      }, pollIntervalMs);
       const onAbort = () => {
         clearTimeout(timer);
         reject(new Error("Lucy binding aborted"));
@@ -54,8 +78,6 @@ export async function syncLucyBindingWithSdk(params: {
       params.signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
-
-  throw new Error("Lucy binding timed out");
 }
 
 export async function connectLucySdk(params: {
@@ -67,11 +89,10 @@ export async function connectLucySdk(params: {
     throw new Error("Lucy not bound");
   }
   const identity = await imClient.deviceIdentity();
-  const cuk = result.client.accessToken() ?? "";
   return {
     client: result.client,
     cdi: identity.cdi,
     userId: identity.user_id!,
-    cuk,
+    cuk: result.cuk,
   };
 }

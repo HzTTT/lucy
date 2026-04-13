@@ -4,8 +4,8 @@ import { LucyImClient } from "lucy-im-sdk";
 import { buildLucyAuthQrUri } from "./auth-qrcode.js";
 import { buildLucyImConfig, resolveLucyAccount } from "./config.js";
 
-export function buildLucyBindQrUrl(channelDeviceId: string): string {
-  return buildLucyAuthQrUri(channelDeviceId);
+export function buildLucyBindQrUrl(channelDeviceId: string, otp?: string): string {
+  return buildLucyAuthQrUri(channelDeviceId, otp);
 }
 
 export function formatLucyAuthQrReply(params: {
@@ -94,15 +94,20 @@ function printLucyAuthQrToConsole(params: {
   console.log(params.qrAscii.trimEnd());
 }
 
-async function buildLucyAuthQrPayload(channelDeviceId: string): Promise<{
+async function buildLucyAuthQrPayload(
+  channelDeviceId: string,
+  otp?: string,
+): Promise<{
   channelDeviceId: string;
+  otp?: string;
   qrUrl: string;
   qrAscii: string;
 }> {
-  const qrUrl = buildLucyBindQrUrl(channelDeviceId);
+  const qrUrl = buildLucyBindQrUrl(channelDeviceId, otp);
   const qrAscii = await renderQrAscii(qrUrl);
   return {
     channelDeviceId,
+    otp,
     qrUrl,
     qrAscii,
   };
@@ -115,13 +120,14 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
 
       lucy
         .command("auth-qrcode")
-        .description("Print a QR code that contains the current channel_device_id for app binding.")
+        .description("Print a QR code that contains the current channel_device_id and OTP for app binding.")
         .action(async () => {
           const account = resolveLucyAccount(api.runtime.config.loadConfig());
           const sdkCfg = buildLucyImConfig(account);
           const imClient = new LucyImClient(sdkCfg);
           const identity = await imClient.deviceIdentity();
-          printLucyAuthQrToConsole(await buildLucyAuthQrPayload(identity.cdi));
+          const preBind = await imClient.preBind();
+          printLucyAuthQrToConsole(await buildLucyAuthQrPayload(identity.cdi, preBind.otp));
         });
 
       lucy
@@ -136,7 +142,8 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
           const imClient = new LucyImClient(sdkCfg);
           await imClient.resetBinding();
           const identity = await imClient.deviceIdentity();
-          const authQr = await buildLucyAuthQrPayload(identity.cdi);
+          const preBind = await imClient.preBind();
+          const authQr = await buildLucyAuthQrPayload(identity.cdi, preBind.otp);
           console.log(
             formatLucyResetStateReply({
               channelDeviceId: authQr.channelDeviceId,
@@ -167,7 +174,8 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
         const sdkCfg = buildLucyImConfig(account);
         const imClient = new LucyImClient(sdkCfg);
         const identity = await imClient.deviceIdentity();
-        const authQr = await buildLucyAuthQrPayload(identity.cdi);
+        const preBind = await imClient.preBind();
+        const authQr = await buildLucyAuthQrPayload(identity.cdi, preBind.otp);
         return {
           text: formatLucyAuthQrReply(authQr),
         };
@@ -179,7 +187,8 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
         const imClient = new LucyImClient(sdkCfg);
         await imClient.resetBinding();
         const identity = await imClient.deviceIdentity();
-        const authQr = await buildLucyAuthQrPayload(identity.cdi);
+        const preBind = await imClient.preBind();
+        const authQr = await buildLucyAuthQrPayload(identity.cdi, preBind.otp);
         return {
           text: formatLucyResetStateReply({
             channelDeviceId: authQr.channelDeviceId,

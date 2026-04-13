@@ -228,7 +228,7 @@ Query 参数：`cdi`, `nonce`, `ts`, `sign`
 {
   "token": "nats_token_xxx",
   "expires_in": 3600,
-  "nats_url": "nats://chat.lucy.run:4222",
+  "nats_url": "nats://<server-returned-address>:4222",
   "access_token": "optional_access_token",
   "access_token_expires_in": 7200
 }

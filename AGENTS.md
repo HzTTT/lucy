@@ -97,7 +97,7 @@ Gateway startup is binding-first, using `lucy-im-sdk-nodejs`:
 5. Plugin subscribes via `session.subscribeChannel("cephalon.im.npc.<user_id>.<cdi>", handler)`.
 6. Plugin publishes via `session.publishChannel("cephalon.im.user.<user_id>", payload)`.
 
-SDK stores state in `~/data/lucy_im/` (Ed25519 keys in `bootstrap_token/`, identifiers in `channel_ids/`).
+SDK stores state in `/var/lib/lucy/identity/` (Ed25519 keys in `bootstrap_token/`, identifiers in `channel_ids/`).
 
 ## Cross-repo change checklist
 
@@ -168,7 +168,7 @@ Use a boundary-first workflow. Prove the cheapest layer first, then move outward
 
 2. Bring up the smallest useful stack.
 - Start NATS and the gateway first.
-- Keep SDK homeDir (`~/data/lucy_im/`) stable so `cdi` and bind state do not drift.
+- Keep SDK homeDir (`/var/lib/lucy/identity/`) stable so `cdi` and bind state do not drift.
 
 3. Separate plugin failure from framework/config failure.
 - Read gateway logs before changing code.

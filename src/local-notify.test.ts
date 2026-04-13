@@ -29,7 +29,7 @@ function createAccount() {
     configured: true,
     userCenterDomain: "user-center.lucy.run",
     lucyServerDomain: "chat.lucy.run",
-    homeDir: "~/data/lucy_im/",
+    homeDir: "/var/lib/lucy/identity/",
     kind: "lucy" as const,
     subjectPrefix: "cephalon.im.npc",
     dmPolicy: "allowlist" as const,

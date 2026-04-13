@@ -3,6 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadLucyMediaFromSourceMock = vi.hoisted(() => vi.fn());
 const publishLucyMachineEventMock = vi.hoisted(() => vi.fn());
+const getLucyActiveSessionMock = vi.hoisted(() => vi.fn(() => undefined as unknown));
+const connectLucySdkMock = vi.hoisted(() => vi.fn());
+const sessionShutdownMock = vi.hoisted(() => vi.fn(async () => undefined));
+
+function makeFakeSession() {
+  return {
+    publishChannel: vi.fn(async () => undefined),
+    subscribeChannel: vi.fn(async () => undefined),
+    accessToken: vi.fn(() => "cuk_demo_user"),
+    shutdown: sessionShutdownMock,
+  };
+}
 
 vi.mock("./media.js", () => ({
   uploadLucyMediaFromSource: vi.fn((params) => uploadLucyMediaFromSourceMock(params)),
@@ -23,17 +35,22 @@ vi.mock("./send.js", () => ({
 
 vi.mock("./auth-binding.js", () => ({
   syncLucyBindingWithSdk: vi.fn(),
-  connectLucySdk: vi.fn(async () => ({
-    client: {
-      publishChannel: vi.fn(async () => undefined),
-      subscribeChannel: vi.fn(async () => undefined),
-      accessToken: vi.fn(() => "cuk_demo_user"),
-      shutdown: vi.fn(async () => undefined),
-    },
-    cdi: "2080563661542787073",
-    userId: "user_demo",
-    cuk: "cuk_demo_user",
-  })),
+  connectLucySdk: vi.fn(async () => {
+    connectLucySdkMock();
+    return {
+      client: makeFakeSession(),
+      cdi: "2080563661542787073",
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+    };
+  }),
+}));
+
+vi.mock("./gateway.js", () => ({
+  // startLucyGateway is referenced by channel.ts but never invoked in these
+  // unit tests; a no-op stub is enough to let the import resolve.
+  startLucyGateway: vi.fn(),
+  getLucyActiveSession: getLucyActiveSessionMock,
 }));
 
 vi.mock("./snowflake.js", () => ({
@@ -66,6 +83,10 @@ describe("normalizeLucyOutboundTarget", () => {
       fileName: "reply.png",
     });
     publishLucyMachineEventMock.mockReset();
+    connectLucySdkMock.mockReset();
+    sessionShutdownMock.mockReset();
+    getLucyActiveSessionMock.mockReset();
+    getLucyActiveSessionMock.mockReturnValue(undefined as unknown);
   });
 
   it("strips the lucy: prefix used by message tool targets", () => {
@@ -119,6 +140,74 @@ describe("normalizeLucyOutboundTarget", () => {
         ],
       }),
     );
+  });
+
+  it("reuses the active gateway session when one is available", async () => {
+    const sharedSession = makeFakeSession();
+    getLucyActiveSessionMock.mockReturnValue({
+      accountId: "default",
+      session: sharedSession,
+      cdi: "shared-cdi",
+      userId: "shared-user",
+      cuk: "shared-cuk",
+    });
+
+    const sendText = lucyPlugin.outbound?.sendText;
+    expect(sendText).toBeTypeOf("function");
+    const result = await sendText!({
+      cfg: {
+        channels: {
+          lucy: {
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
+          },
+        },
+      } as OpenClawConfig,
+      to: "lucy:cuk_remote",
+      text: "hi there",
+      accountId: "default",
+    });
+
+    // We did not need to open a fresh NATS connection:
+    expect(connectLucySdkMock).not.toHaveBeenCalled();
+    // …and we must not tear down the shared long-lived session afterwards:
+    expect(sessionShutdownMock).not.toHaveBeenCalled();
+    // The event is still published, and the cdi/userId/cuk come from the
+    // shared session rather than a fresh connect.
+    expect(publishLucyMachineEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: sharedSession,
+        cdi: "shared-cdi",
+        userId: "shared-user",
+        cuk: "cuk_remote",
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({ channel: "lucy", to: "cuk_remote" }),
+    );
+  });
+
+  it("falls back to a fresh connect when no active session is registered", async () => {
+    // Default beforeEach already sets getLucyActiveSession to undefined.
+    const sendText = lucyPlugin.outbound?.sendText;
+    expect(sendText).toBeTypeOf("function");
+    await sendText!({
+      cfg: {
+        channels: {
+          lucy: {
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
+          },
+        },
+      } as OpenClawConfig,
+      to: "cuk_demo_user",
+      text: "fallback",
+      accountId: "default",
+    });
+
+    expect(connectLucySdkMock).toHaveBeenCalledTimes(1);
+    // Session was created by this call so it must be shut down in finally{}.
+    expect(sessionShutdownMock).toHaveBeenCalledTimes(1);
   });
 });
 

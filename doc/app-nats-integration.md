@@ -83,12 +83,7 @@ App 侧通过 `lucy-im-sdk-kotlin` 获取自己的 NATS 凭据（IM_USER JetStre
 ## 3. 连接方式
 
 SDK 从 `lucy-server` 的 token 响应中获取 `nats_url`，直接使用该地址连接。
-
-当前已验证的部署：
-
-```text
-nats://chat.lucy.run:4222
-```
+NATS 地址由服务端动态下发，客户端不应硬编码。
 
 ## 4. Subject 约定
 

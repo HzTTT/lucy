@@ -3,7 +3,7 @@ import { z } from "zod";
 export const LUCY_CHANNEL_ID = "lucy";
 export const DEFAULT_ACCOUNT_ID = "default";
 export const DEFAULT_SUBJECT_PREFIX = "cephalon.im.npc";
-export const DEFAULT_HOME_DIR = "~/data/lucy_im/";
+export const DEFAULT_HOME_DIR = "/var/lib/lucy/identity/";
 export const DEFAULT_LOCAL_NOTIFY_BIND = "127.0.0.1";
 export const DEFAULT_LOCAL_NOTIFY_PORT = 8788;
 export const DEFAULT_LOCAL_NOTIFY_PATH = "/usb-events";
@@ -64,6 +64,7 @@ export const LucyConfigSchema = z.object({
   restartHelperCommand: z.string().min(1).optional(),
   restartHelperArgs: z.array(z.string().min(1)).optional(),
   restartOnlineTimeoutMs: z.number().int().positive().optional(),
+  pairingSocket: z.string().min(1).optional(),
 });
 
 export type LucyConfig = z.infer<typeof LucyConfigSchema>;
@@ -239,6 +240,13 @@ export type ResolvedLucyAccount = {
   restartHelperCommand?: string;
   restartHelperArgs?: string[];
   restartOnlineTimeoutMs?: number;
+  /**
+   * Absolute path to the blue-wifi pairing IPC Unix domain socket. When set,
+   * the Lucy gateway connects to this socket during PendingBind so the
+   * attached BLE agent can trigger on-demand preBind() calls and receive the
+   * resulting OTP. Leave empty to disable the IPC integration entirely.
+   */
+  pairingSocket?: string;
 };
 
 export type LucyProbe = {

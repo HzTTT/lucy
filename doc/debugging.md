@@ -6,7 +6,7 @@
 
 所有 probe 脚本通过 user-center 登录获取 NATS token，需要：
 
-1. 本地 Lucy 客户端状态目录存在（默认 `/tmp/lucy-client-home/data/lucy_im/`），包含：
+1. 本地 Lucy 客户端状态目录存在（默认 `/tmp/lucy-test/identity/`），包含：
    - `channel_ids/cdi` — 设备 ID
    - `channel_ids/user_id` — 用户 ID
    - `channel_ids/cuk` — channel user key
@@ -170,13 +170,13 @@ Lucy 是否在线？
 
 测试远程 Lucy 网关时，probe 脚本从本地运行即可（它们通过 user-center 获取 NATS token，不需要直连网关）。
 
-确保本地 `/tmp/lucy-client-home/data/lucy_im/channel_ids/` 中的 `cdi` 和 `user_id` 与远程网关的一致：
+确保本地 `/tmp/lucy-test/identity/channel_ids/` 中的 `cdi` 和 `user_id` 与远程网关的一致：
 
 ```bash
 # 查看远程凭据
-ssh <user>@<host> "cat ~/data/lucy_im/channel_ids/cdi; echo; cat ~/data/lucy_im/channel_ids/user_id"
+ssh <user>@<host> "cat /var/lib/lucy/identity/channel_ids/cdi; echo; cat /var/lib/lucy/identity/channel_ids/user_id"
 
 # 查看本地凭据
-cat /tmp/lucy-client-home/data/lucy_im/channel_ids/cdi
-cat /tmp/lucy-client-home/data/lucy_im/channel_ids/user_id
+cat /tmp/lucy-test/identity/channel_ids/cdi
+cat /tmp/lucy-test/identity/channel_ids/user_id
 ```

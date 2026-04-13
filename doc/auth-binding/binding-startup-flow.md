@@ -5,9 +5,9 @@
 ```
 LucyImClient.init()
   │
-  ├─ 本地生成 Ed25519 密钥对（持久化到 ~/data/lucy_im/bootstrap_token/）
+  ├─ 本地生成 Ed25519 密钥对（持久化到 /var/lib/lucy/identity/bootstrap_token/）
   ├─ POST user-center /v1/devices/new { public_key }
-  └─ 获得 cdi（channel_device_id），持久化到 ~/data/lucy_im/channel_ids/cdi
+  └─ 获得 cdi（channel_device_id），持久化到 /var/lib/lucy/identity/channel_ids/cdi
 ```
 
 这一步幂等——已有 cdi 就跳过。
