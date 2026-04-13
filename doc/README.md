@@ -15,8 +15,6 @@
 
 - [../README.md](../README.md)
   - 仓库总览、当前推荐配置、`auth-qrcode` / `reset-state` 命令、BLE `pairing-info.json` 导出、探针方式、端到端验证命令
-- [raw-event-sequences.md](raw-event-sequences.md)
-  - 当前有效的 raw event 时序与观察结论
 
 ## 当前阅读顺序
 

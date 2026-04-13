@@ -15,7 +15,6 @@
 | `integrated-flow.md` | Lucy 鉴权绑定的统一说明：术语、模块职责、主流程、时序图、实现约束 |
 | `user-center-integration.md` | `user-center` 已落地接口、表结构、响应示例、测试结论 |
 | `app-nats-integration.md` | App / SDK 直接接入 Lucy 的对外协议：凭据来源、subject 约定、入站消息格式、machine event、媒体传输 |
-| `raw-event-sequences.md` | 当前有效的 machine event 观察结论与客户端兼容要求 |
 
 ## 子目录
 
@@ -33,7 +32,7 @@
    - 若做绑定/认证工作，参考 `integrated-flow.md` 的术语和模块职责
    - 若做 `user-center` 集成，看 `user-center-integration.md` 的当前接口
    - 若做 App / SDK，对照 `app-nats-integration.md` 的协议边界
-   - 若做 raw event 追踪，参考 `raw-event-sequences.md` 的观察结论
+   - 若做 raw event 或 machine event 字段追踪，优先参考 `app-nats-integration.md` 的当前协议说明
 
 2. **验证当前状态**
    - 文档与代码冲突时，以当前代码为准；更新文档而不是反向修改代码
@@ -59,6 +58,6 @@
 5. **调试时的参考**
    - 查看 `app-nats-integration.md` 第 8 节"调试边界"来判断故障层级
    - 查看 `integrated-flow.md` 第 5 节"实现上的关键结论"来避免身份混淆
-   - 查看 `raw-event-sequences.md` 来识别当前有效的事件字段名
+   - 查看 `app-nats-integration.md` 来识别当前有效的事件字段名和客户端兼容要求
 
 <!-- MANUAL: -->
