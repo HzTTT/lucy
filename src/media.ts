@@ -1,22 +1,32 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { blobPut, blobFetch, type BlobProviderSession } from "lucy-im-sdk";
+import { blobPut, blobFetch } from "lucy-im-sdk";
 import { loadLucyOutboundMediaFromUrl } from "./outbound-media.js";
 import type { LucyMediaDescriptor, LucyMediaKind } from "./types.js";
 import { LUCY_MEDIA_TRANSPORT } from "./types.js";
 
-// Track active blob sessions for outbound media
-const activeBlobSessions: Map<string, BlobProviderSession> = new Map();
+// The current SDK exposes blobPut outcomes as plain descriptors (`blobRef`,
+// `fileHash`) and relies on native-side LRU eviction instead of explicit close.
+// Keep only timer state locally so callers can cancel pending cleanup when the
+// event lifecycle finishes early.
+const activeBlobCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const BLOB_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+function clearBlobSessionTimer(eventId: string): void {
+  const timer = activeBlobCleanupTimers.get(eventId);
+  if (!timer) {
+    return;
+  }
+  clearTimeout(timer);
+  activeBlobCleanupTimers.delete(eventId);
+}
+
 function scheduleSessionCleanup(eventId: string): void {
-  setTimeout(() => {
-    const session = activeBlobSessions.get(eventId);
-    if (session) {
-      session.close();
-      activeBlobSessions.delete(eventId);
-    }
+  clearBlobSessionTimer(eventId);
+  const timer = setTimeout(() => {
+    activeBlobCleanupTimers.delete(eventId);
   }, BLOB_SESSION_TIMEOUT_MS);
+  activeBlobCleanupTimers.set(eventId, timer);
 }
 
 function inferMediaKindFromExt(ext: string): LucyMediaKind {
@@ -69,7 +79,6 @@ export async function uploadLucyMediaFromSource(params: {
   }
 
   const session = blobPut(data, fileName);
-  activeBlobSessions.set(params.eventId, session);
   scheduleSessionCleanup(params.eventId);
 
   return {
@@ -97,9 +106,5 @@ export async function downloadLucyMediaDescriptor(params: {
 }
 
 export function cleanupBlobSession(eventId: string): void {
-  const session = activeBlobSessions.get(eventId);
-  if (session) {
-    session.close();
-    activeBlobSessions.delete(eventId);
-  }
+  clearBlobSessionTimer(eventId);
 }
