@@ -1,0 +1,230 @@
+[
+  {
+    "timestamp": "2026-04-13T19:57:05+0800",
+    "direction": "read",
+    "step": "BLE scan result",
+    "data": {
+      "name": "cephalon",
+      "address": "519AF758-99B8-D118-6F8A-89F8B2E1F87D",
+      "rssi": "N/A"
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:08+0800",
+    "direction": "read",
+    "step": "device_info (UUID: 7f0c0001)",
+    "data": {
+      "hostname": "cephalon",
+      "model": "",
+      "serial": "",
+      "interface": "wlan0",
+      "ip": "192.168.0.9",
+      "ssid": "",
+      "state": "connected",
+      "error": ""
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:08+0800",
+    "direction": "read",
+    "step": "network_status (UUID: 7f0c0002)",
+    "data": {
+      "state": "connected",
+      "ssid": "",
+      "ip": "192.168.0.9",
+      "error": "",
+      "updatedAt": "2026-04-13T11:57:08.26998792Z"
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:08+0800",
+    "direction": "read",
+    "step": "lucy_pairing_info (UUID: 7f0c0005)",
+    "data": {
+      "version": 1,
+      "channel": "lucy",
+      "state": "ready",
+      "channel_device_id": "2043659680854093824",
+      "binding_status": "pending",
+      "created_at_ms": 1776081412014,
+      "otp": "357066",
+      "otp_expires_at_ms": 1776081564869
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:08+0800",
+    "direction": "write",
+    "step": "lucy_pairing_request (UUID: 7f0c0006)",
+    "data": {
+      "request_id": "1776081428529"
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:10+0800",
+    "direction": "read",
+    "step": "lucy_pairing_info with OTP overlay (UUID: 7f0c0005)",
+    "data": {
+      "version": 1,
+      "channel": "lucy",
+      "state": "ready",
+      "channel_device_id": "2043659680854093824",
+      "binding_status": "pending",
+      "created_at_ms": 1776081412014,
+      "otp": "323584",
+      "otp_expires_at_ms": 1776081728856
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:10+0800",
+    "direction": "write",
+    "step": "POST /v1/login (user-center)",
+    "data": {
+      "url": "https://test.unicorn.org.cn/cephalon/user-center/v1/login",
+      "body": {
+        "phone": "18888888888",
+        "pwd": "cephalon.boss",
+        "way": "phone_pwd"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:11+0800",
+    "direction": "read",
+    "step": "login response",
+    "data": {
+      "status": 200,
+      "body": {
+        "code": 20000,
+        "msg": "操作成功",
+        "data": {
+          "agent": "",
+          "applet_parent_id": "1897614565428736000",
+          "area_code": "+86",
+          "bound_at": "2025-04-02T18:32:21.810847+08:00",
+          "channel": "normal_channel",
+          "cloud_space": 0,
+          "create_mission_power": 0,
+          "created_at": "2024-11-29T17:17:11.871196+08:00",
+          "created_by": "0",
+          "deleted_at": "0001-01-01T08:00:00+08:00",
+          "edges": {},
+          "email": "",
+          "exp": 12035,
+          "exp_level": 3,
+          "github_id": "",
+          "google_id": "",
+          "has_connected_lucy_app": true,
+          "id": "1862247176453038080",
+          "is_frozen": false,
+          "is_hw_distribute_channel": false,
+          "is_mission_category_author": false,
+          "is_node": false,
+          "is_re_register": false,
+          "is_recharge": true,
+          "is_referrer": false,
+          "is_register": false,
+          "is_vip_proxy": false,
+          "jpg_url": "avatar/b37c2c15d1c0aec7fb5b9343a958ad2e.png",
+          "key": "ed2711f339777012aa3b3833cc51645d",
+          "mission_tag": "mining",
+          "name": "test",
+          "new_msg": 0,
+          "new_popup_msg": 0,
+          "nick_name": "dadas",
+          "oidc_client_id": "1862247176453038080",
+          "oidc_secret": "6sXKa8ZIWCo3BNovfz06KD5IhsMQacfm",
+          "parent_id": "1863863160782647296",
+          "phone": "18888888888",
+          "pop_version": "V1.6",
+          "source_third_party_type": "nil",
+          "source_type": "cep",
+          "to_close_since": "0001-01-01T08:00:00+08:00",
+          "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJJbmZvIjoiMTg2MjI0NzE3NjQ1MzAzODA4MCIsImV4cCI6MTc3NjI1MzgzMH0.K1oplAAPX95wjVt5g3D2TUJlqRYMDEHGg8gWU9nUdbE",
+          "ton_address": "",
+          "updated_at": "2026-04-11T18:51:39.599988+08:00",
+          "updated_by": "0",
+          "user_status": "normal",
+          "user_type": "boss"
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:11+0800",
+    "direction": "write",
+    "step": "PUT /v1/channels/lucy/devices/device-bindings (lucy-server)",
+    "data": {
+      "url": "https://test.unicorn.org.cn/aiden/lucy-server/v1/channels/lucy/devices/device-bindings",
+      "method": "PUT",
+      "body": {
+        "otp": "323584"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:13+0800",
+    "direction": "read",
+    "step": "bind response",
+    "data": {
+      "status": 200,
+      "body": {
+        "cdi": "2043659680854093824",
+        "status": "bound"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:23+0800",
+    "direction": "read",
+    "step": "lucy_pairing_info after binding (UUID: 7f0c0005)",
+    "data": {
+      "version": 1,
+      "channel": "lucy",
+      "state": "ready",
+      "channel_device_id": "2043659680854093824",
+      "binding_status": "bound",
+      "created_at_ms": 1776081434247
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:23+0800",
+    "direction": "write",
+    "step": "wifi_scan request (UUID: 7f0c0004)",
+    "data": {
+      "action": "scan"
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:28+0800",
+    "direction": "read",
+    "step": "wifi_scan response (UUID: 7f0c0004)",
+    "data": {
+      "state": "failed",
+      "networks": [],
+      "error": "nmcli -m multiline -f IN-USE,SSID,SIGNAL,SECURITY device wifi list ifname wlan0 --rescan yes failed: exit status 10: Error: Device 'wlan0' not found.",
+      "updatedAt": "2026-04-13T11:57:23.968450738Z"
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:28+0800",
+    "direction": "write",
+    "step": "wifi_config (UUID: 7f0c0003)",
+    "data": {
+      "ssid": "cephalon-bak",
+      "password": "duannao2023",
+      "hidden": false
+    }
+  },
+  {
+    "timestamp": "2026-04-13T19:57:34+0800",
+    "direction": "read",
+    "step": "network_status after WiFi config (UUID: 7f0c0002)",
+    "data": {
+      "state": "connected",
+      "ssid": "",
+      "ip": "192.168.0.9",
+      "error": "",
+      "updatedAt": "2026-04-13T11:57:33.263264707Z"
+    }
+  }
+]
