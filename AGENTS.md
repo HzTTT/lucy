@@ -12,6 +12,7 @@ When docs and code disagree, treat the current code as the source of truth and u
 - `extensions/lucy/doc/auth-binding/integrated-flow.md` — binding/auth flow across Lucy, `user-center`, iOS, and `auth-callout`.
 - `extensions/lucy/doc/app-nats-integration.md` — app/client protocol contract for NATS subjects, machine events, presence, and media.
 - `extensions/lucy/outside/user-center/docs/lucy-model-config.md` — Lucy `current-user/model-config` contract, lazy API-key creation, and environment-derived `base_url`.
+- `extensions/lucy/doc/debugging.md` — debugging scripts catalog, usage examples, and decision tree for diagnosing Lucy issues.
 
 ## Related external components (`outside/` symlinks)
 
@@ -128,7 +129,7 @@ Run these from the OpenClaw repo root unless noted otherwise.
 - Targeted typecheck: `pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/src/*.ts`
 - Optional local NATS: `docker compose -f extensions/lucy/docker-compose.nats.yml up -d nats`
 - Print bind QR: `pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json`
-- Transport smoke test: `pnpm exec tsx extensions/lucy/scripts/demo-chat.ts --server nats://chat.lucy.run:4222 --channel-user-key <channel_user_key> --channel-device-id <channel_device_id> --text "Reply with exactly LUCY_E2E_OK." --wait-ms 25000`
+- Transport smoke test: `pnpm exec tsx extensions/lucy/scripts/demo-chat.ts --channel-user-key <channel_user_key> --channel-device-id <channel_device_id> --text "Reply with exactly LUCY_E2E_OK." --wait-ms 25000` (NATS address is obtained from the token endpoint; pass `--server` only to override)
 - Plugin helper commands:
   - `openclaw lucy auth-qrcode`
   - `openclaw lucy reset-state`
@@ -156,6 +157,8 @@ For app-facing changes under `outside/LucyIOSDemo/**`, the default completion lo
 9. If no physical iPhone is connected or device launch/log capture fails, report the blocker clearly, include the exact failing step, and fall back to simulator verification only as a degraded path.
 
 ## Debug workflow
+
+See `extensions/lucy/doc/debugging.md` for the full debugging scripts catalog, usage examples, and decision tree.
 
 Use a boundary-first workflow. Prove the cheapest layer first, then move outward.
 
