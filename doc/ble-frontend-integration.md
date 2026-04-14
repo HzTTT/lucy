@@ -148,7 +148,7 @@ const data = await readCharacteristic(DEVICE_INFO_UUID);
   "hostname": "cephalon",
   "model": "",
   "serial": "",
-  "interface": "wlan0",
+  "interface": "wlx6c1ff7dd744a",
   "ip": "192.168.0.9",
   "ssid": "",
   "state": "connected",
@@ -444,27 +444,45 @@ await sleep(5000);
 const scanResult = await readCharacteristic(WIFI_SCAN_UUID);
 ```
 
-#### 扫描结果示例
+#### 扫描结果（实际测试 2026-04-14）
 
 ```json
 {
   "state": "ready",
   "networks": [
     {
-      "ssid": "MyNetwork",
-      "signal": 87,
-      "security": "WPA2",
-      "active": true
+      "ssid": "Cephalon",
+      "signal": 100,
+      "security": "WPA1 WPA2",
+      "active": false
     },
     {
-      "ssid": "Guest-WiFi",
-      "signal": 65,
-      "security": "Open",
+      "ssid": "Cephalon-Bak",
+      "signal": 100,
+      "security": "WPA1 WPA2",
+      "active": false
+    },
+    {
+      "ssid": "ChinaNet-5beu",
+      "signal": 100,
+      "security": "WPA1 WPA2",
+      "active": false
+    },
+    {
+      "ssid": "ChinaNet-5beu-5G",
+      "signal": 95,
+      "security": "WPA1 WPA2",
+      "active": false
+    },
+    {
+      "ssid": "YSZX-wifi",
+      "signal": 89,
+      "security": "",
       "active": false
     }
   ],
   "error": "",
-  "updatedAt": "2026-04-13T11:57:23Z"
+  "updatedAt": "2026-04-14T02:58:01.746563554Z"
 }
 ```
 
@@ -526,15 +544,15 @@ const NETWORK_STATUS_UUID = "7f0c0002-4f31-4a32-a917-9a4ec0b20001";
 const statusData = await readCharacteristic(NETWORK_STATUS_UUID);
 ```
 
-#### 成功连接响应
+#### 成功连接响应（实际测试 2026-04-14）
 
 ```json
 {
   "state": "connected",
   "ssid": "cephalon-bak",
-  "ip": "192.168.0.100",
+  "ip": "192.168.0.9",
   "error": "",
-  "updatedAt": "2026-04-13T11:57:33Z"
+  "updatedAt": "2026-04-14T02:58:23.329879893Z"
 }
 ```
 
