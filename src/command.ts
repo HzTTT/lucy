@@ -3,6 +3,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { LucyImClient } from "lucy-im-sdk";
 import { buildLucyAuthQrUri } from "./auth-qrcode.js";
 import { buildLucyImConfig, resolveLucyAccount } from "./config.js";
+import { syncLucyPairingExport } from "./pairing-export.js";
 
 export function buildLucyBindQrUrl(channelDeviceId: string, otp?: string): string {
   return buildLucyAuthQrUri(channelDeviceId, otp);
@@ -142,6 +143,8 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
           const imClient = new LucyImClient(sdkCfg);
           await imClient.resetBinding();
           const identity = await imClient.deviceIdentity();
+          // Sync pairing-info.json so blue-wifi picks up the new cdi
+          await syncLucyPairingExport(account.homeDir).catch(() => {});
           const preBind = await imClient.preBind();
           const authQr = await buildLucyAuthQrPayload(identity.cdi, preBind.otp);
           console.log(
@@ -187,6 +190,8 @@ export function registerLucyCommand(api: OpenClawPluginApi): void {
         const imClient = new LucyImClient(sdkCfg);
         await imClient.resetBinding();
         const identity = await imClient.deviceIdentity();
+        // Sync pairing-info.json so blue-wifi picks up the new cdi
+        await syncLucyPairingExport(account.homeDir).catch(() => {});
         const preBind = await imClient.preBind();
         const authQr = await buildLucyAuthQrPayload(identity.cdi, preBind.otp);
         return {
