@@ -719,26 +719,36 @@ WiFi 扫描、连接、断开等操作会短暂干扰 BLE 连接。尤其是写�
 **前端处理策略：**
 
 1. **写入 `wifi_config` 后预期断连** — 不要将断连视为错误，这是正常行为
-2. **等待 10-15 秒后重新扫描连接** — WiFi 连接完成后 BLE 会恢复
-3. **重连后读取 `network_status`** — 验证 WiFi 是否配置成功
+2. **等待 60-90 秒后重新扫描连接** — WiFi 连接包含多频段重试，combo dongle 需要较长恢复时间
+3. **使用多轮重试扫描** — 首次扫描可能因广播恢复中而失败，建议最多重试 3 次
+4. **重连后读取 `network_status`** — 验证 WiFi 是否配置成功
 
 ```javascript
-// WiFi 配置的推荐流程
+// WiFi 配置的推荐流程（含重连重试）
 async function configureWiFi(ssid, password) {
   // 1. 写入配置（使用 write-without-response 模式）
   await writeCharacteristicWithoutResponse(WIFI_CONFIG_UUID, JSON.stringify({
     ssid, password, hidden: false
   }));
 
-  // 2. 预期 BLE 断连，等待 WiFi 连接完成
-  await sleep(15000);
+  // 2. BLE 会断连，WiFi 连接需要 60-90 秒（含频段重试）
+  // 使用多轮重试扫描
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const waitMs = attempt * 30000; // 30s, 60s, 90s
+    await sleep(waitMs);
 
-  // 3. 重新扫描并连接设备
-  const device = await scanAndConnect();
-
-  // 4. 验证 WiFi 连接状态
-  const status = await readCharacteristic(NETWORK_STATUS_UUID);
-  return status.state === "connected" && status.ssid === ssid;
+    // 3. 尝试重新扫描并连接
+    try {
+      const device = await scanAndConnect({ timeout: 15000 });
+      const status = await readCharacteristic(NETWORK_STATUS_UUID);
+      if (status.state === "connected") {
+        return { success: true, ssid: status.ssid, ip: status.ip };
+      }
+    } catch (e) {
+      console.log(`第 ${attempt} 次重连未成功，继续重试...`);
+    }
+  }
+  return { success: false, error: "重连超时" };
 }
 ```
 
