@@ -708,6 +708,66 @@ openclaw lucy reset-state
 - `binding_status` 返回 `pending`
 - 前端需重新完整执行绑定流程
 
+### WiFi+BLE 共用射频注意事项（Combo Dongle）
+
+部分 Lucy 设备使用 WiFi+BT combo USB 适配器（如 Realtek `0bda:b851`），WiFi 和 BLE 共享同一射频模块。这会导致以下行为：
+
+**WiFi 操作期间 BLE 可能断连**
+
+WiFi 扫描、连接、断开等操作会短暂干扰 BLE 连接。尤其是写入 `wifi_config` 触发 WiFi 连接后，BLE 连接很可能中断。
+
+**前端处理策略：**
+
+1. **写入 `wifi_config` 后预期断连** — 不要将断连视为错误，这是正常行为
+2. **等待 10-15 秒后重新扫描连接** — WiFi 连接完成后 BLE 会恢复
+3. **重连后读取 `network_status`** — 验证 WiFi 是否配置成功
+
+```javascript
+// WiFi 配置的推荐流程
+async function configureWiFi(ssid, password) {
+  // 1. 写入配置（使用 write-without-response 模式）
+  await writeCharacteristicWithoutResponse(WIFI_CONFIG_UUID, JSON.stringify({
+    ssid, password, hidden: false
+  }));
+
+  // 2. 预期 BLE 断连，等待 WiFi 连接完成
+  await sleep(15000);
+
+  // 3. 重新扫描并连接设备
+  const device = await scanAndConnect();
+
+  // 4. 验证 WiFi 连接状态
+  const status = await readCharacteristic(NETWORK_STATUS_UUID);
+  return status.state === "connected" && status.ssid === ssid;
+}
+```
+
+**WiFi 扫描可能返回空结果**
+
+首次扫描时 NetworkManager 缓存可能为空。服务端已加自动重试（3 秒后重读），但前端建议也做兜底：如果返回空 `networks`，等待 5 秒后重试一次。
+
+### 写入模式选择
+
+所有写入特征（`wifi_config`、`wifi_scan`、`lucy_pairing_request`）同时支持两种 BLE 写入模式：
+
+| 模式 | iOS API | Android API | 适用场景 |
+|------|---------|-------------|---------|
+| Write With Response | `.withResponse` | `WRITE_TYPE_DEFAULT` | 需要确认写入成功 |
+| Write Without Response | `.withoutResponse` | `WRITE_TYPE_NO_RESPONSE` | **推荐** — 更快，射频争用时更可靠 |
+
+**推荐优先使用 Write Without Response**，尤其是 `wifi_config` 写入，因为 combo dongle 环境下 Write With Response 需要额外的 ACK 往返，更容易因射频争用而超时。
+
+```swift
+// iOS 示例：使用 writeWithoutResponse
+peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+```
+
+```kotlin
+// Android 示例：使用 WRITE_TYPE_NO_RESPONSE
+characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+gatt.writeCharacteristic(characteristic)
+```
+
 ### JSON 数据格式
 
 所有 BLE 特性的数据均为 **UTF-8 编码的 JSON**。读写时需正确编码 / 解码：
