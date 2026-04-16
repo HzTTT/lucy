@@ -793,10 +793,17 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
 
   /** Subscribe to the inbound JetStream subject on the current session. */
   const subscribeInbound = async () => {
+    ctx.log?.info?.(
+      `[lucy] JetStream subscribe starting subject=${subscribeSubject}`,
+    );
     await session.subscribeChannel(subscribeSubject, async (msg: JetStreamMessage) => {
       if (stopped) return;
       try {
-        updateLucyStatus(ctx, { lastInboundAt: Date.now() });
+        const inboundAt = Date.now();
+        updateLucyStatus(ctx, { lastInboundAt: inboundAt });
+        ctx.log?.debug?.(
+          `[lucy] status patch lastInboundAt=${inboundAt} subject=${msg.subject} bytes=${msg.payload.byteLength}`,
+        );
         let payload: unknown;
         try {
           payload = JSON.parse(Buffer.from(msg.payload).toString("utf8")) as unknown;
@@ -814,7 +821,11 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
           cuk,
           cdi,
         });
-        updateLucyStatus(ctx, { lastOutboundAt: Date.now() });
+        const outboundAt = Date.now();
+        updateLucyStatus(ctx, { lastOutboundAt: outboundAt });
+        ctx.log?.debug?.(
+          `[lucy] status patch lastOutboundAt=${outboundAt} (after inbound dispatch) subject=${msg.subject}`,
+        );
       } catch (err) {
         updateLucyStatus(ctx, { lastError: String(err) });
         ctx.log?.error?.(`[lucy] inbound dispatch failed: ${String(err)}`);
@@ -828,6 +839,9 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
         });
       }
     });
+    ctx.log?.info?.(
+      `[lucy] JetStream subscribe registered (pull consumer running) subject=${subscribeSubject}`,
+    );
   };
 
   try {
