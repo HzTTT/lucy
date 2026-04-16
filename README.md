@@ -1,8 +1,8 @@
 # Lucy
 
-Lucy 是 OpenClaw 的 Lucy Channel 插件，用来把 OpenClaw Gateway 接到 Lucy App 的消息链路上。标准部署场景下，请使用 npm 包 `@hzttt/lucy` 安装；在 OpenClaw 内部，插件 id、配置前缀和 CLI 命令名都叫 `lucy`。
+Lucy 是 OpenClaw 的 Lucy Channel 插件，用来把 OpenClaw Gateway 接到 Lucy App 的消息链路上。标准部署场景下，请使用 npm 包 `@hzttt/lucy-ai-npc` 安装；在 OpenClaw 内部，插件 id、配置前缀和 CLI 命令名都叫 `lucy`。
 
-当前设计中，Lucy 不再依赖额外安装独立的 `cephalon` provider 插件。`@hzttt/lucy` 在注册 channel 的同时，也会把 `providerId = cephalon` 的 provider 一并注册到 OpenClaw，用于接收 App 下发的模型配置并把主 agent 默认模型切到 `cephalon/kimi-k2.5`。
+当前设计中，Lucy 不再依赖额外安装独立的 `cephalon` provider 插件。`@hzttt/lucy-ai-npc` 在注册 channel 的同时，也会把 `providerId = cephalon` 的 provider 一并注册到 OpenClaw，用于接收 App 下发的模型配置并把主 agent 默认模型切到 `cephalon/kimi-k2.5`。
 
 ## 版本要求
 
@@ -25,7 +25,7 @@ SDK 工作目录默认为 `/var/lib/lucy/identity/`，存放密钥对和绑定�
 最小接入流程请直接按下面三条命令执行，不要改成其他安装方式：
 
 ```bash
-openclaw plugins install @hzttt/lucy
+openclaw plugins install @hzttt/lucy-ai-npc
 openclaw config set channels.lucy.enabled true
 ```
 
@@ -56,7 +56,7 @@ openclaw lucy auth-qrcode
 
 ## 接入流程说明
 
-1. 用 `openclaw plugins install @hzttt/lucy` 安装插件。
+1. 用 `openclaw plugins install @hzttt/lucy-ai-npc` 安装插件。
 2. 打开 `channels.lucy.enabled`。
 3. 执行 `openclaw lucy auth-qrcode`，在 Lucy App 中扫码完成绑定。
 4. 绑定完成后，Lucy App 可继续拉取 `GET /v1/channels/lucy/current-user/model-config`，并把模型配置下发到设备。
@@ -197,7 +197,7 @@ Lucy 收到 `provision_model` 控制消息后会：
 
 ## 注意事项
 
-- 安装包名是 `@hzttt/lucy`，不是 `lucy`。
+- 安装包名是 `@hzttt/lucy-ai-npc`，不是 `lucy`。
 - Lucy 需要 OpenClaw `2026.3.23` 及以上版本。
 - OpenClaw 配置键和命令名是 `lucy`，例如 `channels.lucy.*` 和 `openclaw lucy ...`。
 - `servers` 必须按 JSON 数组写入，因此推荐直接使用文档里的命令，不要手工改写。

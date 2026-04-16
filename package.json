@@ -1,7 +1,7 @@
 {
-  "name": "@hzttt/lucy",
+  "name": "@hzttt/lucy-ai-npc",
   "version": "2026.4.2",
-  "description": "OpenClaw Lucy NATS DM channel plugin",
+  "description": "OpenClaw Lucy NATS DM channel plugin (AI NPC variant)",
   "type": "module",
   "main": "./index.ts",
   "scripts": {
@@ -18,7 +18,10 @@
     "README.md",
     "index.ts",
     "openclaw.plugin.json",
-    "src"
+    "src",
+    "lucy-im-sdk/dist",
+    "lucy-im-sdk/package.json",
+    "lucy-im-sdk/README.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -43,14 +46,14 @@
     "channel": {
       "id": "lucy",
       "label": "Lucy",
-      "selectionLabel": "Lucy (NATS DM)",
+      "selectionLabel": "Lucy AI NPC (NATS DM)",
       "docsPath": "/channels/lucy",
       "docsLabel": "lucy",
       "blurb": "DM-only chat over NATS subjects scoped by channel_user_key and channel_device_id.",
       "order": 95
     },
     "install": {
-      "npmSpec": "@hzttt/lucy",
+      "npmSpec": "@hzttt/lucy-ai-npc",
       "localPath": "extensions/lucy",
       "defaultChoice": "npm"
     }

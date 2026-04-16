@@ -1,7 +1,7 @@
 {
   "id": "lucy",
   "name": "Lucy",
-  "description": "Lucy NATS DM channel plugin",
+  "description": "Lucy NATS DM channel plugin (AI NPC variant)",
   "channels": ["lucy"],
   "providers": ["cephalon"],
   "configSchema": {
