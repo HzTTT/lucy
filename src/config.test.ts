@@ -27,6 +27,7 @@ describe("lucy config", () => {
     expect(account.allowFrom).toEqual([]);
     expect(account.configured).toBe(true);
     expect(account.mediaMaxBytes).toBe(20 * 1024 * 1024);
+    expect(account.maxAttachments).toBe(10);
   });
 
   it("keeps configured mediaLocalRoots for outbound local media sends", () => {

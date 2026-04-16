@@ -151,8 +151,9 @@ Heartbeat 消息格式（发到 `client.status.report`）：
 
 当前推荐同时支持：
 
-- `version = 2`：普通聊天消息
+- `version = 2`：普通聊天消息（单媒体）
 - `version = 3`：控制消息（例如模型配置下发）
+- `version = 4`：多媒体聊天消息（当前推荐）
 
 ### 文本消息示例
 
@@ -192,10 +193,12 @@ Heartbeat 消息格式（发到 `client.status.report`）：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `version` | `2` | 是 | 当前推荐固定为 `2` |
+| `version` | `2` / `4` | 是 | `2` = 单媒体，`4` = 多媒体（推荐） |
+| `kind` | `string` | V4 必填 | `"chat"` 或 `"provision_model"`（V4 only） |
 | `messageId` | `string` | 强烈建议 | 建议始终提供；必须是 19 位数字字符串 |
-| `text` | `string` | 条件必填 | `text` 与 `media` 至少一个存在 |
-| `media` | `object` | 条件必填 | 单个媒体 descriptor |
+| `text` | `string` | 条件必填 | `text`、`media`、`attachments` 至少一个存在 |
+| `media` | `object` | 条件必填 | 单个媒体 descriptor（V2 兼容字段） |
+| `attachments` | `object[]` | 条件必填 | 多个媒体 descriptor 数组（V4 推荐） |
 | `timestamp` | `number` | 否 | 毫秒时间戳 |
 | `metadata` | `Record<string, unknown>` | 否 | 辅助观测信息 |
 
@@ -228,6 +231,44 @@ Heartbeat 消息格式（发到 `client.status.report`）：
 - 当前只支持 `providerId = cephalon`
 - 当前只支持 `modelId = kimi-k2.5`
 - 该消息不会进入普通聊天 agent 链路，而是由 Lucy 插件直接处理
+
+### V4 多媒体消息示例
+
+```json
+{
+  "version": 4,
+  "kind": "chat",
+  "messageId": "1773582494346106548",
+  "text": "describe these images",
+  "attachments": [
+    {
+      "transport": "iroh-blob",
+      "blob_ref": "nodeticket:aeat1...",
+      "kind": "image",
+      "contentType": "image/png",
+      "size": 104857,
+      "fileName": "photo1.png"
+    },
+    {
+      "transport": "iroh-blob",
+      "blob_ref": "nodeticket:aeat2...",
+      "kind": "image",
+      "contentType": "image/jpeg",
+      "size": 204800,
+      "fileName": "photo2.jpg"
+    }
+  ],
+  "timestamp": 1773582494349
+}
+```
+
+### V4 attachments 兼容性规则
+
+- `attachments` 优先于 `media`：当 `attachments` 存在且非空时，忽略 `media` 字段
+- 仅 `media` 存在时等价于 `attachments: [media]`（向后兼容 V2）
+- 单个附件大小不超过 `mediaMaxMb`（默认 20 MB）
+- 附件数量不超过 `maxAttachments`（默认 10，最大 20）；超出部分静默截断
+- V4 的 `kind` 字段必填：`"chat"` 或 `"provision_model"`
 
 ## 6. Lucy -> App：machine event 协议
 
@@ -279,7 +320,8 @@ Heartbeat 消息格式（发到 `client.status.report`）：
 | `text` | 否 | partial/final/reasoning/error 文本 |
 | `toolName` | 否 | tool.start/tool.end 使用 |
 | `metadata` | 否 | 扩展信息，不保证结构稳定；当前 iOS 客户端按 `[String: String]?` 解码，所以新增字段时优先使用扁平字符串键值 |
-| `media` | 否 | `assistant.final` 的媒体 descriptor |
+| `media` | 否 | `assistant.final` 的第一个媒体 descriptor（兼容字段） |
+| `attachments` | 否 | `assistant.final` 的全部媒体 descriptor 数组 |
 
 ### 主动系统消息
 

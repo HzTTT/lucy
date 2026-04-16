@@ -48,7 +48,9 @@ import { syncLucyPairingExport } from "./pairing-export.js";
 import type {
   LucyInboundMessage,
   LucyInboundMessageV3,
+  LucyInboundMessageV4,
   LucyInboundMessageV2,
+  LucyMediaDescriptor,
   LucyMediaKind,
   ResolvedLucyAccount,
 } from "./types.js";
@@ -57,12 +59,27 @@ import { LucyInboundMessageSchema } from "./types.js";
 type LucyGatewayContext = ChannelGatewayContext<ResolvedLucyAccount>;
 type PluginChannelRuntime = PluginRuntime["channel"];
 
-function normalizeLucyInboundMessage(inbound: LucyInboundMessage): LucyInboundMessageV2 {
+/** Internal normalized form — decoupled from protocol version. */
+type NormalizedLucyInbound = Omit<LucyInboundMessageV2, "media"> & {
+  attachments: LucyMediaDescriptor[];
+};
+
+function resolveAttachments(inbound: LucyInboundMessage): LucyMediaDescriptor[] {
+  if ("attachments" in inbound && (inbound as LucyInboundMessageV4).attachments?.length) {
+    return (inbound as LucyInboundMessageV4).attachments!;
+  }
+  if ("media" in inbound && inbound.media) {
+    return [inbound.media];
+  }
+  return [];
+}
+
+function normalizeLucyInboundMessage(inbound: LucyInboundMessage): NormalizedLucyInbound {
   return {
     version: 2,
     messageId: inbound.messageId,
     text: inbound.text?.trim() || undefined,
-    media: "media" in inbound ? inbound.media : undefined,
+    attachments: resolveAttachments(inbound),
     timestamp: inbound.timestamp,
     metadata: inbound.metadata,
     channelUserKey: inbound.channelUserKey ?? inbound.apiKey,
@@ -72,20 +89,20 @@ function normalizeLucyInboundMessage(inbound: LucyInboundMessage): LucyInboundMe
 
 function isLucyProvisioningInboundMessage(
   inbound: LucyInboundMessage,
-): inbound is LucyInboundMessageV3 & { kind: "provision_model"; provision: NonNullable<LucyInboundMessageV3["provision"]> } {
-  return inbound.version === 3 && "kind" in inbound && inbound.kind === "provision_model";
+): inbound is (LucyInboundMessageV3 | LucyInboundMessageV4) & { kind: "provision_model"; provision: NonNullable<LucyInboundMessageV3["provision"]> } {
+  return (inbound.version === 3 || inbound.version === 4) && "kind" in inbound && inbound.kind === "provision_model";
 }
 
 function buildMediaPlaceholder(kind: LucyMediaKind): string {
   return `<media:${kind}>`;
 }
 
-function buildInboundRawBody(inbound: LucyInboundMessageV2): string {
+function buildInboundRawBody(inbound: NormalizedLucyInbound): string {
   if (inbound.text?.trim()) {
     return inbound.text.trim();
   }
-  if (inbound.media) {
-    return buildMediaPlaceholder(inbound.media.kind);
+  if (inbound.attachments.length > 0) {
+    return inbound.attachments.map((a) => buildMediaPlaceholder(a.kind)).join(" ");
   }
   return "";
 }
@@ -112,7 +129,7 @@ function buildInboundContext(params: {
   account: ResolvedLucyAccount;
   channelRuntime: PluginChannelRuntime;
   route: { agentId: string; sessionKey: string; accountId?: string };
-  inbound: LucyInboundMessageV2;
+  inbound: NormalizedLucyInbound;
   cuk: string;
   cdi: string;
   rawBody: string;
@@ -176,30 +193,28 @@ async function publishAssistantFinalEvent(params: {
     mediaUrls: params.mediaUrls,
   });
 
-  let media;
+  const uploaded: LucyMediaDescriptor[] = [];
   let skippedUnsupportedMediaCount = 0;
-  let mediaWarning: string | undefined;
-  let selectedMediaIndex = -1;
+  let lastMediaWarning: string | undefined;
 
-  for (const [index, candidate] of candidates.entries()) {
+  for (const candidate of candidates) {
     try {
-      media = await uploadLucyMediaFromSource({
+      const descriptor = await uploadLucyMediaFromSource({
         eventId: baseEvent.eventId,
         mediaUrl: candidate,
         maxBytes: params.account.mediaMaxBytes,
         mediaLocalRoots: params.account.mediaLocalRoots,
         trustedLocalPath: true,
       });
-      selectedMediaIndex = index;
-      break;
+      uploaded.push(descriptor);
     } catch (err) {
       skippedUnsupportedMediaCount += 1;
-      mediaWarning = String(err);
+      lastMediaWarning = String(err);
     }
   }
 
-  if (!trimmedText && !media) {
-    if (mediaWarning) {
+  if (!trimmedText && uploaded.length === 0) {
+    if (lastMediaWarning) {
       await publishLucyMachineEvent({
         session: params.session,
         userId: params.userId,
@@ -209,13 +224,13 @@ async function publishAssistantFinalEvent(params: {
         sourceMessageId: params.sourceMessageId,
         runId: params.runId,
         sessionKey: params.sessionKey,
-        text: `assistant media upload failed: ${mediaWarning}`,
+        text: `assistant media upload failed: ${lastMediaWarning}`,
       });
     }
     return;
   }
 
-  if (mediaWarning) {
+  if (lastMediaWarning) {
     await publishLucyMachineEvent({
       session: params.session,
       userId: params.userId,
@@ -225,19 +240,13 @@ async function publishAssistantFinalEvent(params: {
       sourceMessageId: params.sourceMessageId,
       runId: params.runId,
       sessionKey: params.sessionKey,
-      text: `assistant media upload warning: ${mediaWarning}`,
+      text: `assistant media upload warning: ${lastMediaWarning}`,
     });
   }
 
   const metadata =
-    candidates.length > 1 || skippedUnsupportedMediaCount > 0
-      ? {
-          droppedMediaCount:
-            selectedMediaIndex >= 0
-              ? Math.max(candidates.length - selectedMediaIndex - 1, 0)
-              : 0,
-          skippedUnsupportedMediaCount,
-        }
+    skippedUnsupportedMediaCount > 0
+      ? { skippedUnsupportedMediaCount }
       : undefined;
   await publishLucyMachineEvent({
     session: params.session,
@@ -250,7 +259,8 @@ async function publishAssistantFinalEvent(params: {
     runId: params.runId,
     sessionKey: params.sessionKey,
     text: trimmedText,
-    media,
+    media: uploaded[0],
+    attachments: uploaded,
     metadata,
   });
 }
@@ -380,25 +390,31 @@ export async function handleLucyInboundMessage(params: {
   }
 
   let mediaPayload: Record<string, unknown> | undefined;
-  if (inbound.media) {
-    const resolvedMedia = await downloadLucyMediaDescriptor({
-      descriptor: inbound.media,
-    });
-    const saved = await params.channelRuntime.media.saveMediaBuffer(
-      resolvedMedia.buffer,
-      resolvedMedia.contentType,
-      "lucy",
-      params.account.mediaMaxBytes,
-      resolvedMedia.fileName,
+  const effectiveAttachments = inbound.attachments.slice(0, params.account.maxAttachments);
+  if (effectiveAttachments.length > 0) {
+    const resolved = await Promise.all(
+      effectiveAttachments.map((desc) => downloadLucyMediaDescriptor({ descriptor: desc })),
     );
-    const savedContentType = saved.contentType ?? resolvedMedia.contentType;
+    const saved = await Promise.all(
+      resolved.map((r) =>
+        params.channelRuntime.media.saveMediaBuffer(
+          r.buffer,
+          r.contentType,
+          "lucy",
+          params.account.mediaMaxBytes,
+          r.fileName,
+        ),
+      ),
+    );
+    const mediaPaths = saved.map((s) => s.path);
+    const mediaTypes = saved.map((s, i) => s.contentType ?? resolved[i].contentType);
     mediaPayload = {
-      MediaPath: saved.path,
-      MediaUrl: saved.path,
-      MediaType: savedContentType,
-      MediaPaths: [saved.path],
-      MediaUrls: [saved.path],
-      MediaTypes: savedContentType ? [savedContentType] : undefined,
+      MediaPath: mediaPaths[0],
+      MediaUrl: mediaPaths[0],
+      MediaType: mediaTypes[0],
+      MediaPaths: mediaPaths,
+      MediaUrls: mediaPaths,
+      MediaTypes: mediaTypes,
     };
   }
 

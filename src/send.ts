@@ -19,6 +19,7 @@ type BuildMachineEventParams = {
   toolName?: string;
   metadata?: Record<string, unknown>;
   media?: LucyMediaDescriptor;
+  attachments?: LucyMediaDescriptor[];
   approvalId?: string;
   approvalSlug?: string;
   approvalCommand?: string;
@@ -45,6 +46,7 @@ export function buildLucyMachineEvent(params: BuildMachineEventParams): LucyMach
     toolName: params.toolName,
     metadata: params.metadata,
     media: params.media,
+    attachments: params.attachments?.length ? params.attachments : undefined,
     approvalId: params.approvalId,
     approvalSlug: params.approvalSlug,
     approvalCommand: params.approvalCommand,
@@ -71,6 +73,7 @@ export async function publishLucyMachineEvent(params: {
   toolName?: string;
   metadata?: Record<string, unknown>;
   media?: LucyMediaDescriptor;
+  attachments?: LucyMediaDescriptor[];
   approvalId?: string;
   approvalSlug?: string;
   approvalCommand?: string;

@@ -110,6 +110,7 @@ function createAccount() {
     dmPolicy: "allowlist" as const,
     allowFrom: ["cuk_demo_user"],
     mediaMaxBytes: 20 * 1024 * 1024,
+    maxAttachments: 10,
   };
 }
 
@@ -322,6 +323,117 @@ describe("handleLucyInboundMessage", () => {
     );
   });
 
+  it("supports v4 multi-attachment inbound and outbound payloads", async () => {
+    downloadMediaSpy
+      .mockResolvedValueOnce({
+        buffer: Buffer.from("image-1"),
+        contentType: "image/png",
+        fileName: "photo-1.png",
+      })
+      .mockResolvedValueOnce({
+        buffer: Buffer.from("image-2"),
+        contentType: "image/jpeg",
+        fileName: "photo-2.jpg",
+      });
+    uploadMediaSpy
+      .mockResolvedValueOnce({
+        transport: "iroh-blob",
+        blob_ref: "blob:reply_1",
+        kind: "image",
+        contentType: "image/png",
+        size: 7,
+        fileName: "reply-1.png",
+      })
+      .mockResolvedValueOnce({
+        transport: "iroh-blob",
+        blob_ref: "blob:reply_2",
+        kind: "image",
+        contentType: "image/jpeg",
+        size: 9,
+        fileName: "reply-2.jpg",
+      });
+    const { runtime, recordInboundSession, saveMediaBuffer } = createChannelRuntime({
+      finalPayload: {
+        text: "final with images",
+        mediaUrls: ["/tmp/reply-1.png", "/tmp/reply-2.jpg"],
+      },
+    });
+    saveMediaBuffer
+      .mockResolvedValueOnce({
+        path: "/tmp/photo-1.png",
+        contentType: "image/png",
+      })
+      .mockResolvedValueOnce({
+        path: "/tmp/photo-2.jpg",
+        contentType: "image/jpeg",
+      });
+
+    const session = createMockSession();
+    await handleLucyInboundMessage({
+      cfg: {
+        channels: {
+          lucy: {
+            userCenterDomain: "user-center.lucy.run",
+          },
+        },
+      } as OpenClawConfig,
+      account: createAccount(),
+      channelRuntime: runtime,
+      inbound: {
+        version: 4,
+        kind: "chat",
+        text: "describe these images",
+        attachments: [
+          {
+            transport: "iroh-blob",
+            blob_ref: "blob:inbound_photo_1",
+            kind: "image",
+            contentType: "image/png",
+            size: 7,
+            fileName: "photo-1.png",
+          },
+          {
+            transport: "iroh-blob",
+            blob_ref: "blob:inbound_photo_2",
+            kind: "image",
+            contentType: "image/jpeg",
+            size: 9,
+            fileName: "photo-2.jpg",
+          },
+        ],
+      },
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
+    });
+
+    expect(downloadMediaSpy).toHaveBeenCalledTimes(2);
+    expect(saveMediaBuffer).toHaveBeenCalledTimes(2);
+    expect(recordInboundSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ctx: expect.objectContaining({
+          MediaPath: "/tmp/photo-1.png",
+          MediaPaths: ["/tmp/photo-1.png", "/tmp/photo-2.jpg"],
+          MediaType: "image/png",
+          MediaTypes: ["image/png", "image/jpeg"],
+        }),
+      }),
+    );
+    expect(publishSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "assistant.final",
+        media: expect.objectContaining({
+          blob_ref: "blob:reply_1",
+        }),
+        attachments: [
+          expect.objectContaining({ blob_ref: "blob:reply_1" }),
+          expect.objectContaining({ blob_ref: "blob:reply_2" }),
+        ],
+      }),
+    );
+  });
+
   it("emits an error when payload channelUserKey mismatches the subject namespace", async () => {
     const { runtime } = createChannelRuntime();
     const session = createMockSession();
@@ -432,6 +544,7 @@ describe("LucyExecApprovalHandler", () => {
       kind: "lucy" as const,
       subjectPrefix: "cephalon.im.npc",
       mediaMaxBytes: 20 * 1024 * 1024,
+      maxAttachments: 10,
       enabled: true,
       configured: true,
       dmPolicy: "open" as const,

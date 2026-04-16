@@ -8,6 +8,7 @@ export const DEFAULT_LOCAL_NOTIFY_BIND = "127.0.0.1";
 export const DEFAULT_LOCAL_NOTIFY_PORT = 8788;
 export const DEFAULT_LOCAL_NOTIFY_PATH = "/usb-events";
 export const DEFAULT_MEDIA_MAX_MB = 20;
+export const DEFAULT_MAX_ATTACHMENTS = 10;
 export const SUBJECT_TOKEN_RE = /^[A-Za-z0-9_-]+$/;
 export const LUCY_MEDIA_TRANSPORT = "iroh-blob";
 export const LucyBindingStatusSchema = z.enum(["pending", "registered", "bound"]);
@@ -59,6 +60,7 @@ export const LucyConfigSchema = z.object({
   dmPolicy: LucyDmPolicySchema.optional(),
   allowFrom: z.array(z.string().min(1)).optional(),
   mediaMaxMb: z.number().positive().optional(),
+  maxAttachments: z.number().int().positive().max(20).optional(),
   mediaLocalRoots: z.array(z.string().min(1)).optional(),
   localNotify: LucyLocalNotifyConfigSchema.optional(),
   restartHelperCommand: z.string().min(1).optional(),
@@ -158,7 +160,47 @@ export const LucyInboundMessageV3Schema = z
     }
   });
 
+export const LucyInboundMessageV4Schema = z
+  .object({
+    version: z.literal(4),
+    kind: z.enum(["chat", "provision_model"]),
+    messageId: LucyMessageIdSchema.optional(),
+    text: z.string().optional(),
+    media: LucyMediaDescriptorSchema.optional(),
+    attachments: z.array(LucyMediaDescriptorSchema).optional(),
+    provision: LucyProvisioningPayloadSchema.optional(),
+    timestamp: z.number().int().optional(),
+    metadata: LucyMetadataSchema.optional(),
+    channelUserKey: z.string().optional(),
+    channelDeviceId: LucyMessageIdSchema.optional(),
+    apiKey: z.string().optional(),
+    deviceId: LucyMessageIdSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === "chat") {
+      const hasText = Boolean(value.text?.trim());
+      const hasMedia = Boolean(value.media) || Boolean(value.attachments?.length);
+      if (!hasText && !hasMedia) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "text, media, or attachments is required",
+          path: ["text"],
+        });
+      }
+      return;
+    }
+
+    if (!value.provision) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "provision is required",
+        path: ["provision"],
+      });
+    }
+  });
+
 export const LucyInboundMessageSchema = z.union([
+  LucyInboundMessageV4Schema,
   LucyInboundMessageV3Schema,
   LucyInboundMessageV2Schema,
   LucyInboundMessageV1Schema,
@@ -167,6 +209,7 @@ export const LucyInboundMessageSchema = z.union([
 export type LucyInboundMessageV1 = z.infer<typeof LucyInboundMessageV1Schema>;
 export type LucyInboundMessageV2 = z.infer<typeof LucyInboundMessageV2Schema>;
 export type LucyInboundMessageV3 = z.infer<typeof LucyInboundMessageV3Schema>;
+export type LucyInboundMessageV4 = z.infer<typeof LucyInboundMessageV4Schema>;
 export type LucyInboundMessage = z.infer<typeof LucyInboundMessageSchema>;
 export type LucyProvisioningPayload = z.infer<typeof LucyProvisioningPayloadSchema>;
 
@@ -204,6 +247,7 @@ export const LucyMachineEventSchema = z.object({
   toolName: z.string().optional(),
   metadata: LucyMetadataSchema.optional(),
   media: LucyMediaDescriptorSchema.optional(),
+  attachments: z.array(LucyMediaDescriptorSchema).optional(),
   approvalId: z.string().optional(),
   approvalSlug: z.string().optional(),
   approvalCommand: z.string().optional(),
@@ -230,6 +274,7 @@ export type ResolvedLucyAccount = {
   dmPolicy: LucyDmPolicy;
   allowFrom: string[];
   mediaMaxBytes: number;
+  maxAttachments: number;
   mediaLocalRoots?: string[];
   localNotify?: {
     enabled: true;

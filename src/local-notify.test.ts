@@ -35,6 +35,7 @@ function createAccount() {
     dmPolicy: "allowlist" as const,
     allowFrom: ["cuk_demo_user"],
     mediaMaxBytes: 20 * 1024 * 1024,
+    maxAttachments: 10,
   };
 }
 
