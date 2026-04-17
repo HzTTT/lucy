@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { LucyImConfig } from "lucy-im-sdk";
 import {
   DEFAULT_ACCOUNT_ID,
+  DEFAULT_DEVICE_TYPE,
   DEFAULT_HOME_DIR,
   DEFAULT_LOCAL_NOTIFY_BIND,
   DEFAULT_LOCAL_NOTIFY_PATH,
@@ -78,7 +79,7 @@ export function resolveLucyAccount(
   const userCenterDomain = raw.userCenterDomain?.trim() || "";
   const lucyServerDomain = raw.lucyServerDomain?.trim() || "";
   const homeDir = raw.homeDir?.trim() || DEFAULT_HOME_DIR;
-  const kind = raw.kind ?? "lucy";
+  const deviceType = raw.deviceType?.trim() || DEFAULT_DEVICE_TYPE;
   const subjectPrefix = raw.subjectPrefix?.trim() || DEFAULT_SUBJECT_PREFIX;
   const mediaMaxMb = raw.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaLocalRoots = raw.mediaLocalRoots?.map((entry) => entry.trim()).filter(Boolean);
@@ -104,7 +105,7 @@ export function resolveLucyAccount(
     userCenterDomain,
     lucyServerDomain,
     homeDir,
-    kind,
+    deviceType,
     subjectPrefix,
     dmPolicy: raw.dmPolicy ?? "allowlist",
     allowFrom,
@@ -143,6 +144,7 @@ export function buildLucyImConfig(account: ResolvedLucyAccount): LucyImConfig {
     homeDir: account.homeDir,
     userCenterDomain: account.userCenterDomain,
     lucyServerDomain: account.lucyServerDomain,
-    kind: account.kind,
+    kind: "lucy",
+    deviceType: account.deviceType,
   });
 }

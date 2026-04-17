@@ -21,7 +21,7 @@ const PHONE = "18888888888";
 const PWD = "xxx";
 ```
 
-脚本（02/03）会从 `LUCY_HOME`（默认 `/var/lib/lucy/identity`）读取 `channel_ids/cdi`、`user_id`、`cuk`。可以用 `LUCY_HOME=` 覆盖到独立目录：
+脚本（02/03）会从 `LUCY_HOME`（默认 `~/.lucy/identity`）读取 `channel_ids/cdi`、`user_id`、`cuk`。可以用 `LUCY_HOME=` 覆盖到独立目录：
 
 ```bash
 # 用临时目录种绑定状态（与远程 NPC 对齐）

@@ -35,7 +35,7 @@ api.registerChannel() 返回后
       └─ startLucyGateway(ctx)（gateway.ts:590）
           ├─ syncLucyBindingWithSdk()（auth-binding.ts:14）
           │   ├─ 调用 client.init()（SDK 注册设备 → 获得 cdi）
-          │   ├─ 检查本地 /var/lib/lucy/identity/ 状态
+          │   ├─ 检查本地 ~/.lucy/identity/ 状态
           │   ├─ 若状态为 Bound，跳到第三阶段
           │   └─ 若状态为 PendingBind，回调 onPendingBind() 并轮询
           │
@@ -45,11 +45,11 @@ api.registerChannel() 返回后
 
 **阶段 2.1：初始化**
 - SDK `client.init()` 调用 user-center `/v1/devices/new` 注册设备
-- 生成 Ed25519 密钥对，保存到 `/var/lib/lucy/identity/bootstrap_token/`
+- 生成 Ed25519 密钥对，保存到 `~/.lucy/identity/bootstrap_token/`
 - 返回设备 ID（`cdi`）
 
 **阶段 2.2：检查绑定状态**
-- 读 `/var/lib/lucy/identity/channel_ids/` 检查是否已绑定
+- 读 `~/.lucy/identity/channel_ids/` 检查是否已绑定
 - 若文件存在 → 设备已 Bound，跳到 2.3
 - 若文件不存在或缺失 `cuk` → 设备处于 PendingBind 状态
 
@@ -62,7 +62,7 @@ api.registerChannel() 返回后
   3. 展示 QR 码或通过 IPC 将 OTP 发送给 BLE 设备
 - 然后 SDK 继续轮询 `/v1/channels/lucy/devices/device-bindings`（每 2 秒一次）
 - 当用户在 App 侧完成绑定后，API 返回 `{ user_id, cuk }`
-- SDK 把这些值写入 `/var/lib/lucy/identity/channel_ids/`，状态变为 Bound
+- SDK 把这些值写入 `~/.lucy/identity/channel_ids/`，状态变为 Bound
 - **OTP 不持久化**：OTP 是临时凭证；若过期需重新调用 `preBind()`
 
 **阶段 2.3：NATS 连接**
@@ -178,7 +178,7 @@ docker build --build-arg OPENCLAW_EXTENSIONS=lucy ...
 
 ## 安全性考虑
 
-- **Ed25519 密钥**：存储在 `/var/lib/lucy/identity/bootstrap_token/`，绝不导出
+- **Ed25519 密钥**：存储在 `~/.lucy/identity/bootstrap_token/`，绝不导出
 - **NATS token**：由 SDK 在内存中持有，不落盘
 - **channel_user_key**：从 user-center 每次连接时获取，用于签名校验
 - **设备重置**：`openclaw lucy reset-state` 删除所有本地标识符，强制重新注册与绑定

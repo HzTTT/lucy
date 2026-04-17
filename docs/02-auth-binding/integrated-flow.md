@@ -9,13 +9,13 @@ Lucy 的设备身份从"未注册"到"已绑定"的全过程由 `lucy-im-sdk-nod
 Lucy 只有三种身份状态，不存在中间状态或失效状态：
 
 ### 状态 1：Unregistered（未注册）
-- **特征**：`/var/lib/lucy/identity/` 目录不存在或为空
+- **特征**：`~/.lucy/identity/` 目录不存在或为空
 - **首次启动时进入**
 - **SDK 操作**：`client.init()` 调用 user-center `/v1/devices/new` 注册设备
   - 发送 Ed25519 公钥
   - 收到 `cdi`（channel device ID）
-  - 保存公钥到 `/var/lib/lucy/identity/bootstrap_token/`
-  - 保存 `cdi` 到 `/var/lib/lucy/identity/channel_ids/`
+  - 保存公钥到 `~/.lucy/identity/bootstrap_token/`
+  - 保存 `cdi` 到 `~/.lucy/identity/channel_ids/`
 - **转移条件**：注册成功 → PendingBind
 
 ### 状态 2：PendingBind（待绑定）
@@ -274,10 +274,10 @@ await connectedClient.session.publishChannel(
 
 ## 本地状态文件
 
-Lucy 的所有持久化状态由 SDK 存储在用户主目录（通常 `/var/lib/lucy/identity/`）：
+Lucy 的所有持久化状态由 SDK 存储在用户主目录（通常 `~/.lucy/identity/`）：
 
 ```
-/var/lib/lucy/identity/
+~/.lucy/identity/
 ├─ bootstrap_token/
 │  ├─ (public-key).pub         # Ed25519 公钥（用于签名校验）
 │  └─ (public-key).key         # Ed25519 私钥（机密，不导出）
@@ -384,7 +384,7 @@ Response 200:
 ### 场景 3：设备重置
 
 1. 用户运行 `openclaw lucy reset-state`
-2. 删除 `/var/lib/lucy/identity/` 目录
+2. 删除 `~/.lucy/identity/` 目录
 3. 重启 Lucy 插件，回到"首次启动"流程
 
 ---

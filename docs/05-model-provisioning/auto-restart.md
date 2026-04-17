@@ -31,7 +31,7 @@
 其中 `<homeDir>` 是 Lucy 的身份存储目录，默认为：
 
 ```
-/var/lib/lucy/identity/
+~/.lucy/identity/
 ```
 
 ### 票据结构
@@ -296,7 +296,7 @@ channels:
 
 **排查步骤：**
 
-1. 检查重启票据是否存在：`cat /var/lib/lucy/identity/restart-ticket.json`
+1. 检查重启票据是否存在：`cat ~/.lucy/identity/restart-ticket.json`
 2. 检查网关日志中的 NATS 连接日志
 3. 手动发送测试消息验证 NATS 连接：`openclaw lucy demo-chat --text "test"`
 

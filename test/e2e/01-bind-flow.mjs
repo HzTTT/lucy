@@ -3,7 +3,7 @@
  *
  * 测试: SDK init → preBind(OTP) → App登录 → lucy-server绑定 → pollBinding → connect
  *
- * 前置: /var/lib/lucy/identity 目录为空（会自动清理）
+ * 前置: ~/.lucy/identity 目录为空（会自动清理）
  * 运行: node test/e2e/01-bind-flow.mjs
  */
 
@@ -17,13 +17,13 @@ const UC = "https://test.unicorn.org.cn/cephalon/user-center";
 const LS = "https://test.unicorn.org.cn/aiden/lucy-server";
 const PHONE = "18888888888";
 const PWD = "cephalon.boss";
-const HOME_DIR = "/var/lib/lucy/identity/";
+const HOME_DIR = path.join(homedir(), ".lucy/identity/");
 
 // ── 清理旧状态 ──
 try { rmSync(HOME_DIR, { recursive: true, force: true }); } catch {}
 console.log("Cleaned", HOME_DIR);
 
-const cfg = new LucyImConfig({ homeDir: HOME_DIR, userCenterDomain: UC, lucyServerDomain: LS, kind: "lucy" });
+const cfg = new LucyImConfig({ homeDir: HOME_DIR, userCenterDomain: UC, lucyServerDomain: LS, kind: "lucy", deviceType: "cloud" });
 const client = new LucyImClient(cfg);
 
 let passed = 0;

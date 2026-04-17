@@ -50,7 +50,7 @@ flowchart TD
     end
 
     subgraph Storage["本地持久化"]
-        IDENTITY["/var/lib/lucy/identity/<br/>Ed25519 keys + cdi + cuk"]
+        IDENTITY["~/.lucy/identity/<br/>Ed25519 keys + cdi + cuk"]
         RESTART["restart-ticket.json"]
         PAIRING["pairing-info.json"]
     end
@@ -116,7 +116,7 @@ flowchart LR
 
 ## 3. 设备绑定三态 {#diagram-binding-states}
 
-Lucy 的身份状态只有三种：未注册、待绑定、已绑定。状态迁移全部由 SDK 内部方法完成，插件只是调用者。PendingBind 期间，调用 SDK 的 `preBind()` 申请 OTP（一次性密码，有效期通常 60 秒），然后 `auth-qrcode.ts` 用 `buildLucyAuthQrUri(channelDeviceId, otp)` 拼成 `lucy://bind?channel_device_id=...&otp=...` URI，方便 App 扫码或 BLE 提取。OTP 不持久化；若过期需重新调用 `preBind()` 申请新 OTP。`cuk` 在 `pollBinding` 返回时写入 `/var/lib/lucy/identity/channel_ids/`，Ready 状态下再调用 `connect()` 才能拿到 NATS 通道。
+Lucy 的身份状态只有三种：未注册、待绑定、已绑定。状态迁移全部由 SDK 内部方法完成，插件只是调用者。PendingBind 期间，调用 SDK 的 `preBind()` 申请 OTP（一次性密码，有效期通常 60 秒），然后 `auth-qrcode.ts` 用 `buildLucyAuthQrUri(channelDeviceId, otp)` 拼成 `lucy://bind?channel_device_id=...&otp=...` URI，方便 App 扫码或 BLE 提取。OTP 不持久化；若过期需重新调用 `preBind()` 申请新 OTP。`cuk` 在 `pollBinding` 返回时写入 `~/.lucy/identity/channel_ids/`，Ready 状态下再调用 `connect()` 才能拿到 NATS 通道。
 
 ```mermaid
 stateDiagram-v2
@@ -137,7 +137,7 @@ stateDiagram-v2
 
     note right of Bound
         持久化：
-        /var/lib/lucy/identity/
+        ~/.lucy/identity/
         ├─ bootstrap_token/ (Ed25519)
         └─ channel_ids/ (cdi + cuk + user_id)
     end note

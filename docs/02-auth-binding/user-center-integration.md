@@ -342,7 +342,7 @@ Lucy 插件通过 OpenClaw 配置文件指定 user-center 和 lucy-server 的地
 ```toml
 [channels.lucy]
 enabled = true
-home_dir = "/var/lib/lucy/identity"
+home_dir = "~/.lucy/identity"
 user_center_domain = "https://user-center.example.com"
 lucy_server_domain = "https://lucy-server.example.com"
 local_notify_port = 6789
@@ -401,7 +401,7 @@ applyLucyProvisioningConfig({
 **问题**：设备注册失败，返回 409 Conflict
 
 - 检查是否有多个设备使用同一公钥
-- 清空本地 `/var/lib/lucy/identity/`，重新注册
+- 清空本地 `~/.lucy/identity/`，重新注册
 
 **问题**：绑定查询返回 401 Unauthorized
 

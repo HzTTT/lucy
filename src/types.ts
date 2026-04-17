@@ -3,7 +3,8 @@ import { z } from "zod";
 export const LUCY_CHANNEL_ID = "lucy";
 export const DEFAULT_ACCOUNT_ID = "default";
 export const DEFAULT_SUBJECT_PREFIX = "cephalon.im.npc";
-export const DEFAULT_HOME_DIR = "/var/lib/lucy/identity/";
+export const DEFAULT_HOME_DIR = "~/.lucy/identity/";
+export const DEFAULT_DEVICE_TYPE = "cloud";
 export const DEFAULT_LOCAL_NOTIFY_BIND = "127.0.0.1";
 export const DEFAULT_LOCAL_NOTIFY_PORT = 8788;
 export const DEFAULT_LOCAL_NOTIFY_PATH = "/usb-events";
@@ -55,7 +56,7 @@ export const LucyConfigSchema = z.object({
   userCenterDomain: z.string().min(1).optional(),
   lucyServerDomain: z.string().min(1).optional(),
   homeDir: z.string().min(1).optional(),
-  kind: z.enum(["lucy", "nas"]).optional(),
+  deviceType: z.string().min(1).optional(),
   subjectPrefix: z.string().min(1).optional(),
   dmPolicy: LucyDmPolicySchema.optional(),
   allowFrom: z.array(z.string().min(1)).optional(),
@@ -269,7 +270,7 @@ export type ResolvedLucyAccount = {
   userCenterDomain: string;
   lucyServerDomain: string;
   homeDir: string;
-  kind: "lucy" | "nas";
+  deviceType: string;
   subjectPrefix: string;
   dmPolicy: LucyDmPolicy;
   allowFrom: string[];

@@ -79,7 +79,7 @@ defineLucyChannelPluginEntry()（channel-plugin-entry.ts:28）
 ### 本地持久化
 
 ```
-/var/lib/lucy/identity/
+~/.lucy/identity/
 ├─ bootstrap_token/          # Ed25519 密钥对（由 SDK 管理）
 └─ channel_ids/              # cdi、cuk、user_id（由 SDK 管理）
 

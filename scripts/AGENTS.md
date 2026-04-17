@@ -32,7 +32,7 @@
 
 ## 环境变量
 
-- `LUCY_DEVICE_STATE_PATH`：设备状态根目录（默认 `/var/lib/lucy/identity/`）
+- `LUCY_DEVICE_STATE_PATH`：设备状态根目录（默认 `~/.lucy/identity/`）
 - `OPENCLAW_CONFIG_PATH`：OpenClaw 配置目录（默认 `/var/lib/openclaw/` 或 `~/.openclaw/`）
 - `NATS_URL`：NATS 服务器地址（默认从 token 接口获取）
 - `VITEST`：测试模式标记

@@ -81,7 +81,7 @@ Lucy 是 TypeScript ESM OpenClaw Channel 插件。认证、绑定、NATS 连接�
 5. 插件通过 `session.subscribeChannel("cephalon.im.npc.<user_id>.<cdi>", handler)` 订阅
 6. 插件通过 `session.publishChannel("cephalon.im.user.<user_id>", payload)` 发布
 
-SDK 在 `/var/lib/lucy/identity/` 下存储状态（Ed25519 密钥在 `bootstrap_token/`，标识在 `channel_ids/`）。
+SDK 在 `~/.lucy/identity/` 下存储状态（Ed25519 密钥在 `bootstrap_token/`，标识在 `channel_ids/`）。
 
 ## 跨仓库修改检查清单
 
@@ -98,7 +98,7 @@ SDK 在 `/var/lib/lucy/identity/` 下存储状态（Ed25519 密钥在 `bootstrap
 分层优先级：证明最便宜的层先，然后向外扩展。
 
 1. **先在本地证明 Lucy**：跑聚焦测试和针对 typecheck；若失败，修代码后再试 Docker
-2. **启动最小化有用的栈**：先启 NATS 和 gateway；保持 SDK homeDir（`/var/lib/lucy/identity/`）稳定
+2. **启动最小化有用的栈**：先启 NATS 和 gateway；保持 SDK homeDir（`~/.lucy/identity/`）稳定
 3. **分离 plugin 失败 vs 框架/config 失败**：读 gateway 日志；用 `channels status --probe` 人工检查；用 `gateway call channels.status ... --json` 获取稳定机器字段；如果 status 说 `configured, works, stopped`，检查 Lucy 生命周期/启动逻辑
 4. **验证容器内运行时依赖可见性**：成功的镜像构建不保证运行时解析有效；若日志显示 `Cannot find module 'nats'`，检查 `/app/extensions/lucy/node_modules` 和 `/app/node_modules`
 5. **先验证传输再验证模型认证**：`inbound.accepted` = JetStream consumer、channel routing、入站分发正常；`assistant.start`/`partial` = 模型执行启动；`assistant.final` 带上游认证文本或 HTTP 401 = Lucy 传输健康，provider 配置是瓶颈

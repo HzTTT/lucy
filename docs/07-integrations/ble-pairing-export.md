@@ -42,7 +42,7 @@ Lucy 插件启动后，会调用 `syncLucyPairingExport()`（`src/pairing-export
 
 **重要说明：**
 - **不含 OTP**：`pairing-info.json` 刻意不包含 OTP，因为 OTP 是临时凭证，且持久化到磁盘会有安全风险
-- **不含 cuk/user_id**：虽然 SDK 在绑定后会保存 `cuk` 和 `user_id` 到 `/var/lib/lucy/identity/channel_ids/`，但 `pairing-info.json` 的导出只反映绑定状态（pending 或 bound），不暴露这些敏感标识符
+- **不含 cuk/user_id**：虽然 SDK 在绑定后会保存 `cuk` 和 `user_id` 到 `~/.lucy/identity/channel_ids/`，但 `pairing-info.json` 的导出只反映绑定状态（pending 或 bound），不暴露这些敏感标识符
 - **绑定状态说明**：
   - `pending`：设备已注册（有 `channel_device_id`），但用户未在 app 侧完成绑定
   - `bound`：设备已完全绑定，用户可以收发消息
@@ -236,7 +236,7 @@ channels:
 | 现象 | 原因 | 排查步骤 |
 |------|------|---------|
 | `pairing-info.json` 不存在 | Lucy 未进入 PendingBind 状态 | 检查 `openclaw channels status --probe`，确保 Lucy 已启动 |
-| BLE 读取失败 | 文件权限不足或路径错误 | 检查 `/var/lib/lucy/` 目录权限，确认路径配置 |
+| BLE 读取失败 | 文件权限不足或路径错误 | 检查 `~/.lucy/` 目录权限，确认路径配置 |
 | IPC socket 连接超时 | Lucy 未启用 IPC 或 socket 路径错误 | 确认 `channels.lucy.pairingSocket` 已设置且路径存在 |
 | OTP 申请返回错误 | lucy-server 不可达或网络问题 | 检查 Lucy gateway 日志，确认 `lucy-server` 连接状态 |
 

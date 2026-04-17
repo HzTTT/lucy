@@ -10,8 +10,8 @@
 |--------|------|--------|------|
 | `channels.lucy.enabled` | boolean | `true` | 启用/禁用 Lucy 频道 |
 | `channels.lucy.name` | string | — | 频道显示名称（可选） |
-| `channels.lucy.kind` | `"lucy"` \| `"nas"` | `"lucy"` | 频道类型标识 |
-| `channels.lucy.homeDir` | string | `/var/lib/lucy/identity/` | SDK 身份数据目录 |
+| `channels.lucy.deviceType` | string | `"cloud"` | 设备类型，上报给 user-center 的 `POST /v1/devices/new` type 字段（`ai_npc` / `claw_pi` / `cloud`，SDK 不校验） |
+| `channels.lucy.homeDir` | string | `~/.lucy/identity/` | SDK 身份数据目录 |
 | `channels.lucy.userCenterDomain` | string | — | user-center API 域名（必填） |
 | `channels.lucy.lucyServerDomain` | string | — | lucy-server 域名（必填） |
 | `channels.lucy.subjectPrefix` | string | `"cephalon.im.npc"` | NATS 主题前缀 |
@@ -45,33 +45,38 @@ channels:
     enabled: true
 ```
 
-#### channels.lucy.kind
+#### channels.lucy.deviceType
 
-- **类型**：`"lucy" | "nas"`
-- **默认值**：`"lucy"`
-- **说明**：频道类型标识。`"lucy"` 为标准 Lucy DM 频道，`"nas"` 用于 NAS 设备场景
+- **类型**：`string`
+- **默认值**：`"cloud"`
+- **说明**：注册设备时上报给 user-center 的 `POST /v1/devices/new` 的 `type` 字段。SDK 不做校验，服务端枚举值：
+  - `ai_npc` — AI NPC 设备
+  - `claw_pi` — 龙虾派
+  - `cloud` — 端脑云及其他（默认）
+
+> 插件固定以 `kind: "lucy"` 调用 SDK，不再暴露为配置项。
 
 ```yaml
 channels:
   lucy:
-    kind: "lucy"
+    deviceType: "ai_npc"
 ```
 
 #### channels.lucy.homeDir
 
 - **类型**：`string`（目录路径）
-- **默认值**：`"/var/lib/lucy/identity/"`
-- **说明**：lucy-im-sdk-nodejs 存储 Ed25519 密钥和设备身份的目录。目录必须存在且有写权限
+- **默认值**：`"~/.lucy/identity/"`
+- **说明**：lucy-im-sdk-nodejs 存储 Ed25519 密钥和设备身份的目录。路径支持 `~` 展开到当前进程 HOME。目录必须存在或可创建，且有写权限
 
 ```yaml
 channels:
   lucy:
-    homeDir: "/var/lib/lucy/identity/"
+    homeDir: "~/.lucy/identity/"
 ```
 
 **目录结构**（由 SDK 自动创建）：
 ```
-/var/lib/lucy/identity/
+~/.lucy/identity/
 ├── bootstrap_token/        # Ed25519 私钥存储
 │   └── key.pem
 └── channel_ids/            # 设备和用户 ID
@@ -282,7 +287,7 @@ channels:
 channels:
   lucy:
     enabled: true
-    homeDir: "/var/lib/lucy/identity/"
+    homeDir: "~/.lucy/identity/"
     userCenterDomain: "https://user.npc.im"
     lucyServerDomain: "https://npc.im"
 ```
@@ -293,8 +298,8 @@ channels:
 channels:
   lucy:
     enabled: true
-    kind: "lucy"
-    homeDir: "/var/lib/lucy/identity/"
+    deviceType: "ai_npc"
+    homeDir: "~/.lucy/identity/"
     userCenterDomain: "https://user.npc.im"
     lucyServerDomain: "https://npc.im"
     dmPolicy: "allowlist"
@@ -341,9 +346,9 @@ Lucy 通过 Ed25519 签名与 lucy-server 交换 token，所有敏感凭证由 S
 确保各目录的权限正确：
 
 ```bash
-# homeDir 必须由 OpenClaw gateway 进程可读写
-mkdir -p /var/lib/lucy/identity/
-chmod 700 /var/lib/lucy/identity/
+# homeDir 必须由 OpenClaw gateway 进程可读写（路径按运行用户的 HOME 展开）
+mkdir -p ~/.lucy/identity/
+chmod 700 ~/.lucy/identity/
 
 # IPC socket 应只有本机进程可访问
 chmod 600 /var/run/lucy/pairing.sock
