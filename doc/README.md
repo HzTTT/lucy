@@ -1,26 +1,20 @@
-# Lucy 文档索引
+<!-- 最后核对：代码版本 ai-npc@2026-04-16，以 src/ 为事实源 -->
 
-当前文档按下面的优先级阅读：
+# Lucy 文档已迁移
 
-## 1. 权威流程文档
+本目录（`doc/`）已弃用。当前 Lucy 文档请改读 [`../docs/`](../docs/README.md)。
 
-- [auth-binding/integrated-flow.md](auth-binding/integrated-flow.md)
-  - Lucy 当前绑定、鉴权、NATS 连接的统一主流程
-- [auth-binding/user-center-integration.md](auth-binding/user-center-integration.md)
-  - `user-center` 已落地接口与返回结构
-- [app-nats-integration.md](app-nats-integration.md)
-  - App / SDK 直接接入 Lucy NATS 协议时的权威边界
+AI agent 指引请读 [`../AGENTS.md`](../AGENTS.md)；`src/` 下的模块索引见 [`../src/AGENTS.md`](../src/AGENTS.md)。
 
-## 2. 运行与验证文档
+## 旧文件 → 新位置对照
 
-- [../README.md](../README.md)
-  - 仓库总览、当前推荐配置、`auth-qrcode` / `reset-state` 命令、BLE `pairing-info.json` 导出、探针方式、端到端验证命令
+| 旧路径（已归档到 git 历史） | 新位置 |
+|---|---|
+| `doc/app-integration-guide.md` + `doc/app-nats-integration.md` | [`docs/07-integrations/app-integration.md`](../docs/07-integrations/app-integration.md) |
+| `doc/auth-binding/binding-startup-flow.md` | [`docs/02-auth-binding/integrated-flow.md`](../docs/02-auth-binding/integrated-flow.md) |
+| `doc/auth-binding/user-center-integration.md` | [`docs/02-auth-binding/user-center-integration.md`](../docs/02-auth-binding/user-center-integration.md) |
+| `doc/ble-frontend-integration.md` | [`docs/07-integrations/ble-pairing-export.md`](../docs/07-integrations/ble-pairing-export.md) |
+| `doc/debugging.md` | [`docs/08-operations/debugging.md`](../docs/08-operations/debugging.md) |
+| `doc/sdk-integration-test-report.md` | [`docs/09-testing/sdk-integration-test-report.md`](../docs/09-testing/sdk-integration-test-report.md) |
 
-## 当前阅读顺序
-
-如果你是第一次接手 Lucy，建议按这个顺序：
-
-1. 先读 [../README.md](../README.md)
-2. 再读 [auth-binding/integrated-flow.md](auth-binding/integrated-flow.md)
-3. 如果你做 App/SDK，对照 [app-nats-integration.md](app-nats-integration.md)
-4. 如果你做 `user-center` 或 `auth-callout`，再读 [auth-binding/user-center-integration.md](auth-binding/user-center-integration.md)
+旧文件已从 worktree 移除；历史版本可通过 `git log --follow -- doc/<文件名>` 查阅。

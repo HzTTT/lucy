@@ -1,43 +1,48 @@
 <!-- Parent: ../AGENTS.md -->
+<!-- 最后核对：代码版本 ai-npc@2026-04-16，以 src/ 为事实源 -->
 
-# scripts — Lucy debugging and testing tools
+# scripts — Lucy 调试与测试脚本
 
-## Purpose
+## 用途
 
-This directory contains debugging, testing, and diagnostic scripts for the Lucy channel plugin. See `doc/debugging.md` for full usage documentation, examples, and the debugging decision tree.
+此目录包含 Lucy channel 插件的调试、测试和诊断脚本。详见 `docs/08-operations/debugging.md` 了解完整用法、示例和调试决策树。
 
-## Key files
+## 脚本清单
 
-| File | Description |
-|------|-------------|
-| `e2e-probe.mjs` | End-to-end probe: login via user-center, connect NATS, publish 4 test cases (plain reply, reasoning, tool use, greeting), verify full event chain. The primary "is Lucy alive?" script. |
-| `correlation-probe.mjs` | Sends a message with a unique tag and waits for the tag to appear in `assistant.final`. Verifies message correlation and rules out cross-talk. |
-| `consumer-info.mjs` | Dumps JetStream `IM_NPC` stream and `npc-<cdi>` consumer state (pending, ack, sequence numbers). Diagnoses message backlog or stalled consumers. |
-| `demo-chat.ts` | Interactive/one-shot NATS chat client with media upload/download support. Connects directly to NATS (user/pass auth). Used for manual testing and CI smoke tests. |
-| `raw-event-probe.mjs` | Docker-oriented event probe: reads config and device state from container paths, runs 6 test cases, outputs JSON report. |
-| `print-probe-fields.mjs` | Parses config and device state to output runtime probe fields (`channelDeviceId`, `clientSubject`, `machineSubject`, `mediaBucket`) as JSON. |
-| `auth-qrcode.ts` | Generates Lucy device binding QR code and URI. Reads local device state, outputs `channel_device_id`, binding URI, and terminal QR code. |
+| 脚本 | 用途 | 运行方式 |
+|------|------|--------|
+| `e2e-probe.mjs` | 端到端探针：user-center 登录、NATS 连接、4 个测试用例（plain reply、reasoning、tool use、greeting）、验证完整事件链。Lucy 健康检查首选脚本 | `node scripts/e2e-probe.mjs [--server <nats_url>]` |
+| `correlation-probe.mjs` | 关联验证：发消息带唯一标签，等待标签在 `assistant.final` 出现。验证消息关联性和排除串扰 | `node scripts/correlation-probe.mjs` |
+| `consumer-info.mjs` | 消费者状态：转储 JetStream `IM_NPC` stream 和 `npc-<cdi>` consumer 状态（pending、ack、序列号）。诊断消息积压或卡住的消费者 | `node scripts/consumer-info.mjs` |
+| `raw-event-probe.mjs` | Docker 探针：从容器路径读取配置和设备状态，运行 6 个测试用例，输出 JSON 报告 | `node scripts/raw-event-probe.mjs` |
+| `print-probe-fields.mjs` | 配置解析：输出运行时探针字段（`channelDeviceId`、`clientSubject`、`machineSubject`、`mediaBucket`）为 JSON | `node scripts/print-probe-fields.mjs` |
+| `demo-chat.ts` | 交互式 NATS 聊天客户端，支持媒体上传/下载。直接连接 NATS（user/pass 认证）。用于手工测试和 CI 烟测 | `pnpm exec tsx scripts/demo-chat.ts [--channel-user-key <cuk> ...]` |
+| `auth-qrcode.ts` | 绑定 QR 码生成：读本地设备状态，输出 `channel_device_id`、binding URI、终端 QR 码 | `pnpm exec tsx scripts/auth-qrcode.ts --json` |
+| `ble-test-flow.py` | BLE 配对流程验证（Python，用于 blue-wifi 测试）| `python3 scripts/ble-test-flow.py` |
 
-## Agent guidance
+## 脚本选择决策树
 
-### Running scripts
+1. **快速健康检查** → `e2e-probe.mjs`（总是从这里开始）
+2. **消息路由正确性** → `correlation-probe.mjs`
+3. **消费者积压 / 卡住的消息** → `consumer-info.mjs`
+4. **手工交互测试** → `demo-chat.ts`
+5. **Docker/容器验证** → `raw-event-probe.mjs`
+6. **配置验证** → `print-probe-fields.mjs`
+7. **设备绑定** → `auth-qrcode.ts`
 
-- Probe scripts (`e2e-probe.mjs`, `correlation-probe.mjs`, `consumer-info.mjs`): run with `node` from the `extensions/lucy/` directory. They authenticate via user-center and do not require direct NATS access.
-- TypeScript scripts (`demo-chat.ts`, `auth-qrcode.ts`): run with `pnpm exec tsx scripts/<name>.ts`.
-- Diagnostic scripts (`print-probe-fields.mjs`, `raw-event-probe.mjs`): run with `node`. Respect env vars `OPENCLAW_CONFIG_PATH`, `LUCY_DEVICE_STATE_PATH`, `OPENCLAW_STATE_DIR`.
+## 环境变量
 
-### When to use which script
+- `LUCY_DEVICE_STATE_PATH`：设备状态根目录（默认 `/var/lib/lucy/identity/`）
+- `OPENCLAW_CONFIG_PATH`：OpenClaw 配置目录（默认 `/var/lib/openclaw/` 或 `~/.openclaw/`）
+- `NATS_URL`：NATS 服务器地址（默认从 token 接口获取）
+- `VITEST`：测试模式标记
 
-1. **Quick health check** → `e2e-probe.mjs` (always start here)
-2. **Message routing correctness** → `correlation-probe.mjs`
-3. **Consumer backlog / stuck messages** → `consumer-info.mjs`
-4. **Manual interactive testing** → `demo-chat.ts`
-5. **Docker/container validation** → `raw-event-probe.mjs`
-6. **Config verification** → `print-probe-fields.mjs`
-7. **Device binding** → `auth-qrcode.ts`
+## 修改规则
 
-### Modification rules
+- **凭证读取**：probe 脚本从 `/tmp/lucy-test/identity/channel_ids/` 或 `LUCY_DEVICE_STATE_PATH` 读取 `cdi`、`user_id`、`cuk`，不要硬编码
+- **认证路径对齐**：probe 脚本（e2e/correlation/consumer-info）用 user-center 登录 + lucy-server token 交换；demo-chat 和 raw-event-probe 用 NATS direct 认证。修改时保持两条路径一致
+- **主题格式约定**：入站 `cephalon.im.npc.<user_id>.<cdi>`，出站 `cephalon.im.user.<user_id>`。改动前同步更新 probe 脚本和 `src/gateway.ts`
 
-- All probe scripts read credentials from `/tmp/lucy-test/identity/channel_ids/`. Do not hardcode `cdi`, `user_id`, or `cuk` values.
-- `demo-chat.ts` and `raw-event-probe.mjs` use direct NATS user/pass authentication. The probe scripts (`e2e-probe.mjs`, `correlation-probe.mjs`, `consumer-info.mjs`) use user-center login + lucy-server token exchange. Keep these two auth paths consistent when modifying.
-- NATS subject format: `cephalon.im.npc.<user_id>.<cdi>` (inbound to NPC), `cephalon.im.user.<user_id>` (outbound from NPC). Do not change without updating both probe scripts and `src/gateway.ts`.
+---
+
+**参考：** `docs/08-operations/debugging.md`、`docs/09-testing/test-strategy.md`

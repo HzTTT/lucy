@@ -1,239 +1,157 @@
-# Repository Guidelines
+# Lucy Channel 插件 — AI Agent 指引
 
 ## Scope
 
-This directory is the `lucy` OpenClaw channel plugin: a DM-only transport that bridges OpenClaw to Lucy clients over NATS via `lucy-im-sdk-nodejs`. The SDK owns auth (Ed25519), binding, NATS token exchange, JetStream messaging, and presence. The plugin owns OpenClaw integration, media transfer, and model provisioning; it does **not** own model/provider availability.
+这个目录是 Lucy OpenClaw Channel 插件：一个 DM-only NATS 传输，通过 `lucy-im-sdk-nodejs` 连接 OpenClaw Gateway 和 Lucy 客户端。SDK 负责认证、绑定、NATS token 交换、JetStream 消息收发和 Presence。插件负责 OpenClaw 集成、媒体传输和模型供应；**不负责**模型/供应商可用性。
 
-When docs and code disagree, treat the current code as the source of truth and update guidance to match the code.
+当代码和文档有矛盾时，以当前代码为事实源，更新文档以匹配代码。
 
-## Read first
+## 必读文档
 
-- `extensions/lucy/README.md` — operational flow, recommended config, validation commands, and transport-vs-model troubleshooting boundaries.
-- `extensions/lucy/doc/auth-binding/integrated-flow.md` — binding/auth flow across Lucy, `user-center`, iOS, and `auth-callout`.
-- `extensions/lucy/doc/app-nats-integration.md` — app/client protocol contract for NATS subjects, machine events, presence, and media.
-- `extensions/lucy/outside/user-center/docs/lucy-model-config.md` — Lucy `current-user/model-config` contract, lazy API-key creation, and environment-derived `base_url`.
-- `extensions/lucy/doc/debugging.md` — debugging scripts catalog, usage examples, and decision tree for diagnosing Lucy issues.
+所有这些文档都指向 `docs/` 新结构（不再用 `doc/` 旧文件）：
 
-## Related external components (`outside/` symlinks)
+- `docs/01-overview/architecture.md` — Lucy 系统架构：SDK 分工、plugin 职责、核心组件关系
+- `docs/02-auth-binding/integrated-flow.md` — 完整的绑定+认证流程：设备注册、OTP、binding 轮询、NATS token
+- `docs/03-transport/nats-subjects.md` — NATS 主题约定：入站/出站主题、消息版本
+- `docs/08-operations/debugging.md` — 调试脚本和决策树
+- 完整索引：`docs/README.md`
 
-For Lucy work, also inspect `extensions/lucy/outside/`. These linked repos are part of the real integration surface.
+## 关联的外部组件（`outside/` symlink）
 
-- `outside/LucyIOSDemo`
-  - iOS client and protocol-validation app.
-  - Check when changing app-facing protocol, BLE pairing UX, machine events, or subject usage.
-  - Key area: `outside/LucyIOSDemo/LucyIOSDemoPackage/Sources/LucyIOSDemoFeature/**`
-- `outside/user-center`
-  - Server-side source of truth for registration, binding, current-user credential lookup, and connection verification.
-  - Check when changing `channel_user_key`, `channel_device_id`, `bootstrap_token`, bind flow, or `/v1/channels/lucy/*` contracts.
-  - Key area: `outside/user-center/internal/routers/channel_binding.go`
-- `outside/npc-im-server`
-  - NATS auth and presence infrastructure.
-  - `auth-callout` verifies Lucy NATS credentials via `user-center` and issues scoped permissions.
-  - `presence-bridge` turns `client.status.report` plus `$SYS.ACCOUNT.>` disconnects into `_discover` online/offline events.
-  - Key areas: `outside/npc-im-server/auth-callout/main.go`, `outside/npc-im-server/presence-bridge/main.py`
-- `outside/blue-wifi`
-  - BLE Wi-Fi provisioning agent.
-  - Reads Lucy's sanitized `pairing-info.json` and exposes it over BLE as `lucy_pairing_info`.
-  - Check when changing BLE pairing handoff or the format/semantics of `pairing-info.json`.
-  - Key area: `outside/blue-wifi/internal/bluewifi/lucy.go`
+这些组件是真实集成的一部分。修改时需要同步验证：
 
-## Architecture role
+- `outside/LucyIOSDemo` — iOS 客户端和协议验证应用。修改 app-facing 协议、BLE pairing UX、机器事件、主题时检查
+- `outside/user-center` — 注册、绑定、current-user 凭证查询的服务端真相源。修改 `cdi`、`cuk`、`user_id`、bind 流程、`/v1/channels/lucy/*` 契约时检查
+- `outside/npc-im-server` — NATS 认证和 Presence 基础设施。`auth-callout` 验证 Lucy NATS 凭证，`presence-bridge` 转换 `_discover` 事件
+- `outside/blue-wifi` — BLE Wi-Fi 供应代理。读 Lucy 的 `pairing-info.json`，通过 BLE 暴露为 `lucy_pairing_info` 特性
 
-Treat this repository as the **OpenClaw-side Lucy channel integration**, not as the source of truth for user identity or binding state.
+## 架构角色
 
-- Lucy plugin responsibilities (via `lucy-im-sdk-nodejs`):
-  - generate Ed25519 keypair and register device with `user-center` to obtain `cdi`
-  - execute pre-bind OTP flow and poll binding to obtain `cuk` + `user_id`
-  - exchange Ed25519-signed params for NATS token and connect
-  - subscribe/publish via JetStream Pull Consumer (stream `IM_NPC`, durable `npc-<cdi>`)
-  - SDK handles presence internally (`_discover` online/offline, heartbeat, ping reply)
-  - export sanitized pairing state for nearby BLE/onboarding flows
-  - embed-register the `cephalon` provider inside the Lucy plugin package itself
-  - accept `version = 3 / kind = provision_model` control messages
-  - write `models.providers.cephalon.*` and switch `agents.defaults.model.primary`
-  - trigger automatic `openclaw gateway restart` (or configured restart helper override) after provisioning
-- `user-center` responsibilities:
-  - accept Ed25519 public key registration, return `cdi`
-  - own user-device binding, `cuk`, and credential lookup
-  - expose `GET /v1/channels/lucy/current-user/model-config`
-  - lazily create and then reuse the Lucy-specific model API key
-- `lucy-server` responsibilities:
-  - pre-bind OTP signing (Ed25519 signature verification)
-  - device binding status query (Ed25519 signature verification)
-  - NATS token exchange (Ed25519 signature verification)
-- `outside/npc-im-server/auth-callout` responsibilities:
-  - validate NATS token
-  - mint minimal NATS permissions for the validated device
-- `outside/blue-wifi` responsibilities:
-  - read Lucy's local pairing export and expose it over BLE
-- iOS / external clients responsibilities (via `lucy-im-sdk-kotlin`):
-  - scan QR or fetch BLE pairing info to obtain `cdi`
-  - call `user-center` bind/current-user APIs
-  - connect NATS via their own SDK
+把这个仓库视为 **OpenClaw 侧的 Lucy channel 集成**，而不是用户身份或绑定状态的真相源。
 
-Keep terminology aligned with the integration docs: `cdi`, `cuk`, `user_id`, and Ed25519 keypair.
+**Lucy 插件职责**（通过 `lucy-im-sdk-nodejs`）：
+- 生成 Ed25519 密钥对，向 user-center 注册设备获得 `cdi`
+- 执行 pre-bind OTP 和轮询绑定获得 `cuk` + `user_id`
+- 交换 Ed25519 签名的参数换取 NATS token 并连接
+- 通过 JetStream Pull Consumer (stream `IM_NPC`, durable `npc-<cdi>`) 订阅/发布
+- SDK 内部处理 Presence（`_discover` 在线/离线、心跳、ping 回复）
+- 导出清理后的配对状态供 BLE/onboarding 流程使用
+- 在 Lucy 插件包内部嵌入注册 `cephalon` provider
+- 接受 `version = 3 / kind = provision_model` 控制消息
+- 写入 `models.providers.cephalon.*` 并切换 `agents.defaults.model.primary`
+- 供应后自动触发 `openclaw gateway restart`（或配置的重启辅助命令）
 
-## Project structure and key code
+**user-center 职责**：接受 Ed25519 公钥注册返回 `cdi`；拥有用户-设备绑定、`cuk`、凭证查询；暴露 `GET /v1/channels/lucy/current-user/model-config`；懒创建并重用 Lucy 专属模型 API key
 
-Lucy is a TypeScript ESM OpenClaw channel plugin. Auth, binding, NATS connection, JetStream messaging, and presence are delegated to `lucy-im-sdk-nodejs` (git submodule at `lucy-im-sdk/`).
+**lucy-server 职责**：pre-bind OTP 签名（Ed25519 验证）；设备绑定状态查询（Ed25519 验证）；NATS token 交换（Ed25519 验证）
 
-- `extensions/lucy/index.ts` — plugin entrypoint
-- `extensions/lucy/lucy-im-sdk/` — git submodule: `lucy-im-sdk-nodejs` (Ed25519 auth, binding, NATS, JetStream, presence)
-- `extensions/lucy/src/channel.ts` — top-level `ChannelPlugin` definition
-- `extensions/lucy/src/gateway.ts` — inbound message pipeline and runtime event mirroring (JetStream consumer)
-- `extensions/lucy/src/send.ts` — machine-event publication (JetStream publish)
-- `extensions/lucy/src/media.ts` — JetStream Object Store upload/download
-- `extensions/lucy/src/pairing-export.ts` — sanitized BLE pairing export (`pairing-info.json`)
-- `extensions/lucy/src/types.ts` — zod schemas and protocol types
+**outside/npc-im-server/auth-callout 职责**：验证 NATS token；为验证的设备颁发最小 NATS 权限
 
-## Startup and binding flow
+**outside/blue-wifi 职责**：读 Lucy 本地配对导出，通过 BLE 暴露
 
-Gateway startup is binding-first, using `lucy-im-sdk-nodejs`:
+**iOS / 外部客户端职责**（通过 `lucy-im-sdk-kotlin`）：扫 QR 或获取 BLE 配对信息获得 `cdi`；调用 user-center bind/current-user API；通过自己的 SDK 连接 NATS
 
-1. `startLucyGateway()` creates `LucyImClient` with config (`homeDir`, `userCenterDomain`, `lucyServerDomain`, `kind`).
-2. Calls `client.init()` — SDK generates Ed25519 keypair, registers device (public key → `cdi`), checks local `cuk`/`user_id`.
-3. If `PendingBind`: calls `client.preBind()` for OTP, then `client.pollBinding()` until bound (persists `cuk` + `user_id`).
-4. Calls `client.connect()` — SDK exchanges Ed25519-signed params for NATS token, connects, initializes JetStream, starts presence.
-5. Plugin subscribes via `session.subscribeChannel("cephalon.im.npc.<user_id>.<cdi>", handler)`.
-6. Plugin publishes via `session.publishChannel("cephalon.im.user.<user_id>", payload)`.
+保持术语一致：`cdi`、`cuk`、`user_id`、Ed25519 密钥对。
 
-SDK stores state in `/var/lib/lucy/identity/` (Ed25519 keys in `bootstrap_token/`, identifiers in `channel_ids/`).
+## 项目结构与关键代码
 
-## Cross-repo change checklist
+Lucy 是 TypeScript ESM OpenClaw Channel 插件。认证、绑定、NATS 连接、JetStream 消息、Presence 全部委托给 `lucy-im-sdk-nodejs`（git submodule `lucy-im-sdk/`）。
 
-- Protocol fields or machine events changed:
-  - update `extensions/lucy/src/**`
-  - verify `outside/LucyIOSDemo/**`
-- Binding semantics or `user-center` / `lucy-server` API changed:
-  - SDK handles auth/binding internally; check `lucy-im-sdk/src/http.ts`, `lucy-im-sdk/src/client.ts`
-  - verify `outside/user-center/**`
-- Model provisioning / auto-restart / embedded `cephalon` provider changed:
-  - update `extensions/lucy/src/cephalon-provider.ts`, `extensions/lucy/src/provider-provisioning.ts`, `extensions/lucy/src/restart-ticket.ts`, `extensions/lucy/src/gateway.ts`, `extensions/lucy/src/types.ts`
-  - verify `outside/user-center/internal/{routers,controllers,handlers,types}/channel_binding.go`
-  - verify `outside/LucyIOSDemo/LucyIOSDemoPackage/Sources/LucyIOSDemoFeature/{LucyModels,LucyServices,LucyRootView,LucySettingsSheetView,LucyRedesignedRootScene}.swift`
-  - update docs in all three repos together so provider id, model id, event names, restart behavior, and `base_url` semantics stay aligned
-- Presence / `_discover` / heartbeat / NATS auth changed:
-  - Presence is handled by SDK internally (`lucy-im-sdk/src/natsConn.ts`)
-  - NATS auth is token-based via SDK (`lucy-im-sdk/src/http.ts` `fetchNatsTokenNpc`)
-  - verify `outside/npc-im-server/**`
-- Pairing export changed:
-  - update `extensions/lucy/src/pairing-export.ts`
-  - verify `outside/blue-wifi/**` and `outside/LucyIOSDemo/**`
+核心文件（详见 `src/AGENTS.md`）：
 
-## Build, test, and development commands
+- `index.ts` — 插件入口点
+- `channel.ts` — 顶级 ChannelPlugin 定义
+- `gateway.ts` — 入站消息管道和运行时事件镜像（JetStream consumer）
+- `send.ts` — 机器事件发布（JetStream publish）
+- `media.ts` — JetStream Object Store 上传/下载
+- `pairing-export.ts` — 清理后的 BLE 配对导出（`pairing-info.json`）
+- `types.ts` — zod schemas 和协议类型
+- `cephalon-provider.ts` — 嵌入式 Cephalon provider 注册
+- `provider-provisioning.ts` — 模型供应流程（version 3 消息处理、配置写入、网关重启）
+- `pairing-ipc-client.ts` — BLE/前端启动 OTP 的 IPC 客户端接口（811 行，关键但常被漏掉）
 
-Run these from the OpenClaw repo root unless noted otherwise.
+## 启动和绑定流程
 
-- Install dependencies if needed: `pnpm install`
-- Focused tests: `vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"`
-- Targeted typecheck: `pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/src/*.ts`
-- Optional local NATS: `docker compose -f extensions/lucy/docker-compose.nats.yml up -d nats`
-- Print bind QR: `pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json`
-- Transport smoke test: `pnpm exec tsx extensions/lucy/scripts/demo-chat.ts --channel-user-key <channel_user_key> --channel-device-id <channel_device_id> --text "Reply with exactly LUCY_E2E_OK." --wait-ms 25000` (NATS address is obtained from the token endpoint; pass `--server` only to override)
-- Plugin helper commands:
-  - `openclaw lucy auth-qrcode`
-  - `openclaw lucy reset-state`
-- Local stack (stable temp dirs): `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d nats openclaw-gateway`
-- Gateway logs: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml logs openclaw-gateway --tail=200`
-- Probe channel runtime: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli channels status --probe`
-- Stable JSON probe fields: `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-lucy-workspace docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml run --rm openclaw-cli gateway call channels.status --params '{"probe":true,"timeoutMs":10000}' --json`
-- Inspect runtime deps in container: `docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml exec openclaw-gateway ls -la /app/extensions/lucy/node_modules`
-- iOS demo regression test: `xcodebuildmcp swift-package test --package-path ./extensions/lucy/outside/LucyIOSDemo/LucyIOSDemoPackage --filter LucyIOSDemoFeatureTests/testMachineEventDecodesCamelCaseChannelDeviceId`
+网关启动是 binding-first，使用 `lucy-im-sdk-nodejs`：
 
-## iPhone verification loop
+1. `startLucyGateway()` 用配置（`homeDir`、`userCenterDomain`、`lucyServerDomain`、`kind`）创建 `LucyImClient`
+2. 调 `client.init()` — SDK 生成 Ed25519 密钥对、注册设备（公钥 → `cdi`）、检查本地 `cuk`/`user_id`
+3. 如果 `PendingBind`：调 `client.preBind()` 获取 OTP，然后 `client.pollBinding()` 轮询到绑定完成（持久化 `cuk` + `user_id`）
+4. 调 `client.connect()` — SDK 交换 Ed25519 签名的参数换取 NATS token、连接、初始化 JetStream、启动 Presence
+5. 插件通过 `session.subscribeChannel("cephalon.im.npc.<user_id>.<cdi>", handler)` 订阅
+6. 插件通过 `session.publishChannel("cephalon.im.user.<user_id>", payload)` 发布
 
-For app-facing changes under `outside/LucyIOSDemo/**`, the default completion loop is:
+SDK 在 `/var/lib/lucy/identity/` 下存储状态（Ed25519 密钥在 `bootstrap_token/`，标识在 `channel_ids/`）。
 
-1. Run the relevant `swift test --package-path outside/LucyIOSDemo/LucyIOSDemoPackage ...` verification first.
-2. Automatically build and run on a connected physical iPhone with `xcodebuildmcp`; do not stop at simulator-only verification when a device is available.
-3. Prefer the connected device named `宏仔头的iPhone (2)`; the current known UDID is `C6EE7005-94ED-5C16-87D7-875DD6ACB13F`. Re-check availability with `xcodebuildmcp device list` each session instead of assuming the device state is unchanged.
-4. Use `xcodebuildmcp device build-and-run --project-path ./outside/LucyIOSDemo/LucyIOSDemo.xcodeproj --scheme LucyIOSDemo --device-id <UDID> --platform iOS` as the default real-device run command.
-5. After a successful device launch, derive the app path and bundle id with:
-   - `xcodebuildmcp device get-app-path --project-path ./outside/LucyIOSDemo/LucyIOSDemo.xcodeproj --scheme LucyIOSDemo --platform iOS`
-   - `xcodebuildmcp device get-app-bundle-id --app-path <APP_PATH>`
-6. Start device log capture before handing the build to the user with `xcodebuildmcp device start-device-log-capture --device-id <UDID> --bundle-id <BUNDLE_ID>`, keep the returned `log-session-id`, then explicitly wait for the user to finish manual testing.
-7. After the user says testing is done, stop capture with `xcodebuildmcp device stop-device-log-capture --log-session-id <LOG_SESSION_ID>`, inspect the logs, and include any relevant runtime findings in the close-out.
-8. Do not claim the Lucy iOS app change is fully verified until the real-device build, the user's manual check, and the post-test log review have all happened, unless the user explicitly waives that loop.
-9. If no physical iPhone is connected or device launch/log capture fails, report the blocker clearly, include the exact failing step, and fall back to simulator verification only as a degraded path.
+## 跨仓库修改检查清单
 
-## Debug workflow
+- **协议字段或机器事件改动**：更新 `extensions/lucy/src/**`、验证 `outside/LucyIOSDemo/**`
+- **绑定语义或 user-center / lucy-server API 改动**：SDK 内部处理；验证 `outside/user-center/**`
+- **模型供应 / 自动重启 / 嵌入式 `cephalon` provider 改动**：更新 `cephalon-provider.ts`、`provider-provisioning.ts`、`restart-ticket.ts`、`gateway.ts`、`types.ts`；验证 `outside/user-center/**` 和 `outside/LucyIOSDemo/**`；三个仓库同时更新文档使 provider id、model id、事件名、重启行为、`base_url` 语义保持一致
+- **Presence / `_discover` / 心跳 / NATS 认证改动**：Presence 由 SDK 内部处理（lucy-im-sdk/src/natsConn.ts）；NATS 认证是 token-based via SDK；验证 `outside/npc-im-server/**`
+- **配对导出改动**：更新 `pairing-export.ts`；验证 `outside/blue-wifi/**` 和 `outside/LucyIOSDemo/**`
 
-See `extensions/lucy/doc/debugging.md` for the full debugging scripts catalog, usage examples, and decision tree.
+## 调试工作流
 
-Use a boundary-first workflow. Prove the cheapest layer first, then move outward.
+见 `docs/08-operations/debugging.md` 了解完整的调试脚本目录和决策树。
 
-1. Prove Lucy locally first.
-- Run focused tests and targeted typechecks.
-- If these fail, fix code before Docker or infra debugging.
+分层优先级：证明最便宜的层先，然后向外扩展。
 
-2. Bring up the smallest useful stack.
-- Start NATS and the gateway first.
-- Keep SDK homeDir (`/var/lib/lucy/identity/`) stable so `cdi` and bind state do not drift.
+1. **先在本地证明 Lucy**：跑聚焦测试和针对 typecheck；若失败，修代码后再试 Docker
+2. **启动最小化有用的栈**：先启 NATS 和 gateway；保持 SDK homeDir（`/var/lib/lucy/identity/`）稳定
+3. **分离 plugin 失败 vs 框架/config 失败**：读 gateway 日志；用 `channels status --probe` 人工检查；用 `gateway call channels.status ... --json` 获取稳定机器字段；如果 status 说 `configured, works, stopped`，检查 Lucy 生命周期/启动逻辑
+4. **验证容器内运行时依赖可见性**：成功的镜像构建不保证运行时解析有效；若日志显示 `Cannot find module 'nats'`，检查 `/app/extensions/lucy/node_modules` 和 `/app/node_modules`
+5. **先验证传输再验证模型认证**：`inbound.accepted` = JetStream consumer、channel routing、入站分发正常；`assistant.start`/`partial` = 模型执行启动；`assistant.final` 带上游认证文本或 HTTP 401 = Lucy 传输健康，provider 配置是瓶颈
+6. **最后验证用更长的等待**：发一条消息等足够久的 `assistant.final`；需要精确事件顺序时用裸 NATS 订阅/发布
 
-3. Separate plugin failure from framework/config failure.
-- Read gateway logs before changing code.
-- Use `channels status --probe` for human checks.
-- Use `gateway call channels.status ... --json` for stable machine-readable fields.
-- If status says `configured, works, stopped`, inspect Lucy lifecycle/startup logic.
+## 失败信号
 
-4. Verify runtime dependency visibility inside containers.
-- A successful image build does not prove runtime resolution works.
-- If logs show `Cannot find module 'nats'`, inspect both `/app/extensions/lucy/node_modules` and `/app/node_modules`.
+- `auto-restart attempt N/10` — Lucy 启动返回太早或在 account start 时抛错
+- `configured, works, stopped` — 框架接受了配置但 listener 没有保活
+- `Cannot find module 'nats'` — 运行时打包问题，不是 TypeScript 问题
+- 没有 `inbound.accepted` — JetStream consumer 设置、NATS token 交换、channel 启动破了
+- `inbound.accepted` 出现但没有 assistant 事件 — 传输活跃；检查模型执行或上游运行时状态
+- `assistant.final` 返回认证或 provider 错误 — Lucy 在工作；修 provider 凭证或模型配置
+- 一条入站消息重复的 accepted/final 事件 — 怀疑 gateway 自动重启和重复 listener 注册，再怪 NATS
 
-5. Verify transport before model auth.
-- `inbound.accepted` means JetStream consumer, channel routing, and inbound dispatch are working.
-- `assistant.start` / `assistant.partial` means model execution started.
-- `assistant.final` with upstream auth text or HTTP 401 means Lucy transport is healthy and provider config is the blocker.
+## 编码风格与命名
 
-6. Use a longer wait for final verification.
-- Publish one message and wait long enough for `assistant.final`.
-- Prefer raw NATS subscriber/publisher when you need exact event order.
+TypeScript ESM，2 空格缩进、分号、相对导入显式 `.js` 后缀。推荐写小的纯 helper（配置解析、主题逻辑、协议规范化）而不是复制验证。
 
-## Failure signals
+## 测试指南
 
-- `auto-restart attempt N/10`:
-  Lucy startup is returning too early or throwing during account start.
-- `configured, works, stopped`:
-  the framework accepted the config, but the listener is not staying alive.
-- `Cannot find module 'nats'`:
-  runtime packaging problem, not a TypeScript problem.
-- No `inbound.accepted`:
-  JetStream consumer setup, NATS token exchange, or channel startup is broken.
-- `inbound.accepted` appears but no assistant events:
-  transport is alive; inspect model execution or upstream runtime state.
-- `assistant.final` returns auth or provider errors:
-  Lucy is working; fix provider credentials or model configuration.
-- Repeated accepted/final events for one inbound message:
-  suspect gateway auto-restart and duplicate listener registration before blaming NATS.
+Vitest 是测试框架。`*.test.ts` 文件放在被测试代码旁。优先写协议 seam 和集成 seam 测试（配置解析、状态持久化、主题生成、配对导出、网关事件、媒体传输）再做 Docker-only 验证。
 
-## Coding style and naming
+## 安全与配置提示
 
-Use TypeScript ESM with 2-space indentation, semicolons, and explicit `.js` suffixes in relative imports. Prefer small pure helpers for config parsing, subject logic, and protocol normalization instead of duplicating validation.
+不要提交真实的 `cuk`、`cdi`、NATS token、Ed25519 私钥或 `user_id` 值。用仍然满足运行时格式规则的占位符（这些值在主题、认证、协议负载中使用）。
 
-## Testing guidelines
+运行时包放在 `dependencies`；只在 `devDependencies` 或 `peerDependencies` 中放 `openclaw`，这样插件安装兼容主机加载器。
 
-Vitest is the test framework. Keep tests as `*.test.ts` beside the code they cover. Favor protocol-seam and integration-seam tests for config resolution, state persistence, subject generation, pairing export, and gateway event emission before Docker-only verification.
+## OpenClaw SDK 兼容性
 
-## Security and configuration tips
+把主机 `openclaw` 包视为有效的 plugin SDK 版本。
 
-Never commit real `cuk`, `cdi`, NATS tokens, Ed25519 private keys, or `user_id` values. Use placeholders that still satisfy the runtime format rules because these values are used in subjects, auth, and protocol payloads.
+- 推荐用 `openclaw/plugin-sdk` 获取通用 plugin API
+- 不要从 Lucy 依赖 `openclaw/plugin-sdk/compat`
+- 只在 Lucy 刻意需要已知版本的情况下用更窄的 subpath
+- 改 SDK 时，用最旧和最新声称支持的主机版本验证 Lucy
 
-Keep runtime packages in `dependencies`; keep `openclaw` in `devDependencies` or `peerDependencies` only so plugin installs remain compatible with the host loader.
+## 快速启动命令
 
-## OpenClaw SDK compatibility
+从 OpenClaw 根目录运行（除非特别说明）：
 
-Treat the host `openclaw` package as the effective plugin SDK version.
+- `pnpm install` — 安装依赖
+- `vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"` — 聚焦测试
+- `pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/src/*.ts` — 针对 typecheck
+- `docker compose -f extensions/lucy/docker-compose.nats.yml up -d nats` — 本地 NATS（可选）
+- `pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json` — 打印绑定 QR
+- `env OPENCLAW_CONFIG_DIR=/tmp/openclaw-lucy-config docker compose -f docker-compose.yml -f extensions/lucy/docker-compose.nats.yml up -d` — 本地栈
+- `openclaw lucy auth-qrcode` — Lucy CLI 命令：生成绑定 QR
+- `openclaw lucy reset-state` — 重置本地状态
 
-- Prefer `openclaw/plugin-sdk` for generic plugin APIs.
-- Do not depend on `openclaw/plugin-sdk/compat` from Lucy.
-- Use narrower subpaths only when Lucy intentionally requires a host version known to export them.
-- When making SDK-facing changes, verify Lucy against the oldest and newest host versions you claim to support.
+见 `docs/09-testing/test-strategy.md` 了解完整的测试命令和 iPhone 验证流程。
 
-## Notes and pitfalls
+---
 
-- `docker build` must receive `--build-arg OPENCLAW_EXTENSIONS=lucy`; setting only a shell env var is not enough for the Dockerfile path that installs extension deps.
-- For bus-backed adapters such as Lucy, account startup should stay blocked until `abortSignal`; spawning a background loop and returning early can trigger OpenClaw auto-restart and duplicate inbound handling.
-- A green build is not enough. Always check the running container filesystem and `channels status --probe`; when scripting against probe fields, prefer `gateway call channels.status ... --json`.
-- When the gateway container is already restarting, prefer fixing the mounted config file directly over trying to use dependent CLI containers.
-- Current model-provisioning design is **not** a separate `cephalon` plugin package. The `cephalon` provider is registered from inside Lucy itself.
-- Do not hardcode `prod` / `test` model gateway URLs in Lucy, LucyIOSDemo, or `user-center`. `base_url` must follow the active environment and come from configuration or the `current-user/model-config` response.
+**最后核对**：2026-04-16，以 `src/` 为事实源
