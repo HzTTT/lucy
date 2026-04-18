@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- 最后核对：代码版本 ai-npc@2026-04-16，以 src/ 为事实源 -->
+<!-- 最后核对：代码版本 ai-npc@2026-04-18，以 src/ 为事实源 -->
 
 # src — Lucy 插件源码
 
@@ -50,6 +50,7 @@ Lucy 插件源码目录包含 DM-only NATS 传输、设备绑定、模型供应�
 | `state.ts` | 本地设备状态管理 | `loadOrCreateLucyDeviceState(path)` — 持久化 `device-state.json`、版本迁移（v1 → v2）、状态缓存 |
 | `types.ts` | Zod schemas 和协议类型 | `LucyDeviceState`、`LucyInboundMessage`、`LucyMachineEvent`、`LucyControlMessage` — 完整类型模型 |
 | `runtime.ts` | 运行时存储引用 | `getLucyRuntime()`、`setLucyRuntime()` — 管理全局 `PluginRuntime` 引用 |
+| `run-context.ts` | 入站请求的 AsyncLocalStorage 上下文 | `runInLucyInboundContext(ctx, fn)`、`getLucyInboundContext()` — 在异步处理链中传递 `sourceMessageId`、`cuk`、`cdi`、`sessionKey`、`runIdRef`，供出站事件（如 `publishAssistantFinalEvent`）读取请求级元数据 |
 
 **参考：** `docs/01-overview/architecture.md`
 
@@ -117,4 +118,4 @@ Lucy 插件源码目录包含 DM-only NATS 传输、设备绑定、模型供应�
 
 ---
 
-**最后核对**：2026-04-16，以 `src/` 为事实源
+**最后核对**：2026-04-18，以 `src/` 为事实源

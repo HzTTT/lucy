@@ -57,18 +57,14 @@
 
 Lucy 是 TypeScript ESM OpenClaw Channel 插件。认证、绑定、NATS 连接、JetStream 消息、Presence 全部委托给 `lucy-im-sdk-nodejs`（git submodule `lucy-im-sdk/`）。
 
-核心文件（详见 `src/AGENTS.md`）：
+**完整的源码文件分类与职责见 `src/AGENTS.md`**（按传输层、绑定认证、模型供应、状态配置、媒体、本地通知、执行审批、辅助与入口分组）。
 
-- `index.ts` — 插件入口点
-- `channel.ts` — 顶级 ChannelPlugin 定义
-- `gateway.ts` — 入站消息管道和运行时事件镜像（JetStream consumer）
-- `send.ts` — 机器事件发布（JetStream publish）
-- `media.ts` — JetStream Object Store 上传/下载
-- `pairing-export.ts` — 清理后的 BLE 配对导出（`pairing-info.json`）
-- `types.ts` — zod schemas 和协议类型
-- `cephalon-provider.ts` — 嵌入式 Cephalon provider 注册
-- `provider-provisioning.ts` — 模型供应流程（version 3 消息处理、配置写入、网关重启）
-- `pairing-ipc-client.ts` — BLE/前端启动 OTP 的 IPC 客户端接口（811 行，关键但常被漏掉）
+顶层入口：
+- `index.ts`（在 `extensions/lucy/` 根，不在 `src/`）— 默认导出 `defineLucyChannelPluginEntry()` 给 OpenClaw 加载器
+- `src/channel-plugin-entry.ts` — entry 钩子实现（注册 channel、命令、provider）
+- `src/channel.ts` — 顶级 ChannelPlugin 定义
+- `src/gateway.ts` — 入站消息管道、JetStream consumer、运行时事件镜像（当前最大的实现文件）
+- `src/run-context.ts` — 入站请求的 AsyncLocalStorage 上下文（`sourceMessageId`、`cuk`、`cdi`、`sessionKey`），用于异步处理链路中传递 per-request 元数据
 
 ## 启动和绑定流程
 
@@ -90,6 +86,7 @@ SDK 在 `~/.lucy/identity/` 下存储状态（Ed25519 密钥在 `bootstrap_token
 - **模型供应 / 自动重启 / 嵌入式 `cephalon` provider 改动**：更新 `cephalon-provider.ts`、`provider-provisioning.ts`、`restart-ticket.ts`、`gateway.ts`、`types.ts`；验证 `outside/user-center/**` 和 `outside/LucyIOSDemo/**`；三个仓库同时更新文档使 provider id、model id、事件名、重启行为、`base_url` 语义保持一致
 - **Presence / `_discover` / 心跳 / NATS 认证改动**：Presence 由 SDK 内部处理（lucy-im-sdk/src/natsConn.ts）；NATS 认证是 token-based via SDK；验证 `outside/npc-im-server/**`
 - **配对导出改动**：更新 `pairing-export.ts`；验证 `outside/blue-wifi/**` 和 `outside/LucyIOSDemo/**`
+- **入站上下文 / AsyncLocalStorage 改动**：更新 `run-context.ts`、`gateway.ts`（通过 `runInLucyInboundContext()` 进入）、`channel.ts`；任何需要在异步处理链中读到 `sourceMessageId` / `cuk` / `cdi` 的新出站事件也要走这个 seam
 
 ## 调试工作流
 
@@ -128,6 +125,8 @@ Vitest 是测试框架。`*.test.ts` 文件放在被测试代码旁。优先写�
 
 运行时包放在 `dependencies`；只在 `devDependencies` 或 `peerDependencies` 中放 `openclaw`，这样插件安装兼容主机加载器。
 
+媒体路径依赖 native 模块 `@hzttt/lucy-blob-node-native`（通过 `lucy-im-sdk` 的 `blobPut`/`blobFetch` 间接使用）。升级版本或改动 blob 生命周期时，需确认 Docker/CI 镜像里有匹配平台的预编译二进制，否则运行时会报模块解析失败。
+
 ## OpenClaw SDK 兼容性
 
 把主机 `openclaw` 包视为有效的 plugin SDK 版本。
@@ -154,4 +153,4 @@ Vitest 是测试框架。`*.test.ts` 文件放在被测试代码旁。优先写�
 
 ---
 
-**最后核对**：2026-04-16，以 `src/` 为事实源
+**最后核对**：2026-04-18，以 `src/` 为事实源

@@ -95,7 +95,7 @@ pairing-info.json            # BLE 配对导出（插件生成）
 | 函数 | 文件 | 行号 | 说明 |
 |------|------|------|------|
 | `defineLucyChannelPluginEntry()` | channel-plugin-entry.ts | 28 | 插件 entry 钩子，注册 channel、命令、provider |
-| `startLucyGateway()` | gateway.ts | 590 | 主运行时程序，阻塞直到 abortSignal |
+| `startLucyGateway()` | gateway.ts | 604 | 主运行时程序，阻塞直到 abortSignal |
 | `buildLucyCephalonProvider()` | cephalon-provider.ts | 55 | 构造嵌入式 cephalon 模型供应商 |
 
 ### 认证与绑定
