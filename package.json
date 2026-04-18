@@ -1,6 +1,6 @@
 {
   "name": "@hzttt/lucy-ai-npc",
-  "version": "2026.4.17",
+  "version": "2026.4.22",
   "description": "OpenClaw Lucy NATS DM channel plugin (AI NPC variant)",
   "type": "module",
   "main": "./index.ts",
@@ -27,6 +27,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@hzttt/lucy-blob-node-native": "^0.3.0",
     "lucy-im-sdk": "file:./lucy-im-sdk",
     "nats": "^2.29.3",
     "qrcode-terminal": "^0.12.0",

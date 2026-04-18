@@ -18,6 +18,7 @@ import {
   collectStatusIssuesFromLastError,
   createDefaultChannelRuntimeState,
 } from "./plugin-sdk-compat.js";
+import { getLucyInboundContext } from "./run-context.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { publishLucyMachineEvent } from "./send.js";
 import {
@@ -103,6 +104,12 @@ async function publishLucyOutboundAssistantFinal(params: {
       throw new Error("lucy outbound requires text or media");
     }
 
+    const inboundCtx = getLucyInboundContext();
+    const linkInbound =
+      inboundCtx && inboundCtx.cuk === targetCuk && inboundCtx.cdi === cdi
+        ? inboundCtx
+        : undefined;
+
     const event = await publishLucyMachineEvent({
       session,
       userId,
@@ -112,6 +119,9 @@ async function publishLucyOutboundAssistantFinal(params: {
       type: "assistant.final",
       text: trimmedText,
       media,
+      sourceMessageId: linkInbound?.sourceMessageId,
+      runId: linkInbound?.runIdRef.current,
+      sessionKey: linkInbound?.sessionKey,
     });
 
     return {

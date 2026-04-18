@@ -42,6 +42,7 @@ import {
   startPairingIpcClient,
   type PairingIpcClientHandle,
 } from "./pairing-ipc-client.js";
+import { runInLucyInboundContext } from "./run-context.js";
 import { buildLucyMachineEvent, publishLucyMachineEvent } from "./send.js";
 import { getProcessSnowflakeGenerator } from "./snowflake.js";
 import { syncLucyPairingExport } from "./pairing-export.js";
@@ -454,8 +455,18 @@ export async function handleLucyInboundMessage(params: {
 
   let runId: string | undefined;
   let activeToolName: string | undefined;
+  const runIdRef: { current?: string } = {};
 
-  await params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher({
+  await runInLucyInboundContext(
+    {
+      sourceMessageId: inbound.messageId!,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      sessionKey: route.sessionKey,
+      runIdRef,
+    },
+    async () => {
+      await params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg: params.cfg,
     dispatcherOptions: {
@@ -484,6 +495,7 @@ export async function handleLucyInboundMessage(params: {
     replyOptions: {
       onAgentRunStart: (nextRunId) => {
         runId = nextRunId;
+        runIdRef.current = nextRunId;
       },
       onPartialReply: async (payload) => {
         if (!payload.text?.trim()) {
@@ -571,6 +583,8 @@ export async function handleLucyInboundMessage(params: {
       },
     },
   });
+    },
+  );
 
   if (activeToolName) {
     await publishLucyMachineEvent({
