@@ -12,7 +12,9 @@
     "test:e2e:msg": "node test/e2e/02-messaging.mjs",
     "test:e2e:media": "node test/e2e/03-media.mjs",
     "test:e2e": "npm run test:e2e:msg && npm run test:e2e:media",
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json",
+    "build:sdk-dist": "rm -rf lucy-im-sdk/dist && npm --prefix lucy-im-sdk run build",
+    "prepack": "npm run build:sdk-dist"
   },
   "files": [
     "README.md",
