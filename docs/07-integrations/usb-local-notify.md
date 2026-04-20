@@ -27,7 +27,7 @@ POST http://127.0.0.1:{port}/usb-events
 
 - **主机**：`127.0.0.1`（仅本机访问）
 - **路径**：`/usb-events`（可通过配置 `channels.lucy.localNotify.path` 覆盖，默认 `/usb-events`）
-- **端口**：`channels.lucy.localNotify.port`（默认 `8788`）
+- **端口**：`channels.lucy.localNotify.port`（默认 `8000`）
 
 ### 请求体格式
 
@@ -61,7 +61,7 @@ POST http://127.0.0.1:{port}/usb-events
 
 ```bash
 # 插入事件
-curl -X POST http://127.0.0.1:8788/usb-events \
+curl -X POST http://127.0.0.1:8000/usb-events \
   -H "Content-Type: application/json" \
   -d '{
     "code": 1,
@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8788/usb-events \
   }'
 
 # 同步完成
-curl -X POST http://127.0.0.1:8788/usb-events \
+curl -X POST http://127.0.0.1:8000/usb-events \
   -H "Content-Type: application/json" \
   -d '{
     "code": 3,
@@ -79,7 +79,7 @@ curl -X POST http://127.0.0.1:8788/usb-events \
   }'
 
 # 同步失败
-curl -X POST http://127.0.0.1:8788/usb-events \
+curl -X POST http://127.0.0.1:8000/usb-events \
   -H "Content-Type: application/json" \
   -d '{
     "code": 4,
@@ -146,14 +146,14 @@ Lucy 的本地通知服务由以下配置键控制（`src/config-schema.ts`）�
 |--------|------|--------|------|
 | `channels.lucy.localNotify.enabled` | boolean | `true` | 是否启用本地通知服务 |
 | `channels.lucy.localNotify.bind` | string | `"127.0.0.1"` | 监听地址（仅本机） |
-| `channels.lucy.localNotify.port` | number | `8788` | 监听端口 |
+| `channels.lucy.localNotify.port` | number | `8000` | 监听端口 |
 | `channels.lucy.localNotify.path` | string | `"/usb-events"` | HTTP 路径 |
 
 ### 环境变量覆盖
 
 ```bash
 export LUCY_LOCAL_NOTIFY_ENABLED=true
-export LUCY_LOCAL_NOTIFY_PORT=8788
+export LUCY_LOCAL_NOTIFY_PORT=8000
 export LUCY_LOCAL_NOTIFY_PATH=/usb-events
 ```
 
@@ -161,10 +161,10 @@ export LUCY_LOCAL_NOTIFY_PATH=/usb-events
 
 ```bash
 # 检查本地通知服务是否在运行
-netstat -tlnp | grep 8788
+netstat -tlnp | grep 8000
 
 # 或使用 curl 探测（应返回 400，因为缺少字段）
-curl -X POST http://127.0.0.1:8788/usb-events \
+curl -X POST http://127.0.0.1:8000/usb-events \
   -H "Content-Type: application/json" \
   -d '{}'
 # 预期响应：
@@ -192,7 +192,7 @@ ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", \
 
 DEVICE=$1
 MODEL=$2
-LUCY_NOTIFY_URL="http://127.0.0.1:8788/usb-events"
+LUCY_NOTIFY_URL="http://127.0.0.1:8000/usb-events"
 
 curl -X POST "$LUCY_NOTIFY_URL" \
   -H "Content-Type: application/json" \
@@ -213,7 +213,7 @@ import sys
 
 def notify_lucy_sync(device: str, status: int, message: str):
     """向 Lucy 发送 USB 同步事件"""
-    url = "http://127.0.0.1:8788/usb-events"
+    url = "http://127.0.0.1:8000/usb-events"
     payload = {
         "code": status,
         "device": device,

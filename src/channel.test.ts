@@ -231,7 +231,13 @@ describe("lucyPlugin.execApprovals", () => {
 
   it("getInitiatingSurfaceState returns disabled for an unconfigured account", () => {
     const cfg = {
-      channels: { lucy: { enabled: true, channelUserKey: "bad.token" } },
+      channels: {
+        lucy: {
+          enabled: true,
+          channelUserKey: "bad.token",
+          localNotify: { enabled: true, port: 70_000 },
+        },
+      },
     } as any;
     const result = lucyPlugin.execApprovals?.getInitiatingSurfaceState?.({
       cfg,

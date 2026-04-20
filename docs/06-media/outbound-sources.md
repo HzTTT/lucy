@@ -188,7 +188,8 @@ mediaLocalRoots: z.array(z.string().min(1)).optional()
 ```
 
 - 类型：字符串数组
-- 默认值：`[]`（空数组，所有 file:// URL 被拒绝）
+- 默认值：`["/home/lucy"]`（Lucy 设备家目录）；**仅当字段完全缺省时应用默认**
+- 显式传 `[]` 表示显式清空白名单（拒绝所有 file:// URL）
 - 可选
 
 ### 配置示例
@@ -378,7 +379,7 @@ cat /tmp/output.jpg
 
 | 配置键 | 类型 | 说明 | 默认值 |
 |--------|------|------|--------|
-| `channels.lucy.mediaLocalRoots` | string[] | 媒体文件白名单目录 | `[]` |
+| `channels.lucy.mediaLocalRoots` | string[] | 媒体文件白名单目录 | `["/home/lucy"]` |
 | `channels.lucy.mediaMaxMb` | number | 单个媒体大小限制（MB） | 20 |
 
 定义位置：`src/types.ts:52-70`

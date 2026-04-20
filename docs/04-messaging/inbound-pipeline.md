@@ -281,7 +281,7 @@ Runtime 执行期间会产生以下机器事件：
 | `channels.lucy.enabled` | bool | 启用 Lucy 插件 | false |
 | `channels.lucy.mediaMaxMb` | number | 单个媒体文件大小限制（MB） | 20 |
 | `channels.lucy.maxAttachments` | number | 单条消息最大附件数 | 10 |
-| `channels.lucy.mediaLocalRoots` | string[] | 出站媒体白名单目录 | [] |
+| `channels.lucy.mediaLocalRoots` | string[] | 出站媒体白名单目录 | ["/home/lucy"] |
 | `channels.lucy.dmPolicy` | "allowlist"\|"open"\|"disabled" | DM 策略 | "allowlist" |
 | `channels.lucy.allowFrom` | string[] | 白名单用户 ID 列表（dmPolicy=allowlist 时） | [] |
 

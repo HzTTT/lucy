@@ -223,12 +223,12 @@ Lucy 的 pairing IPC 配置由以下配置键控制（`src/types.ts` `LucyConfig
 
 | 配置键 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `channels.lucy.pairingSocket` | string | — | blue-wifi IPC Unix domain socket 绝对路径（未设置则不启用 IPC） |
+| `channels.lucy.pairingSocket` | string | `"/run/lucy/pairing.sock"` | blue-wifi IPC Unix domain socket 绝对路径（默认指向 Lucy 设备 blue-wifi 约定路径） |
 
 ```yaml
 channels:
   lucy:
-    pairingSocket: "/var/run/lucy/pairing.sock"
+    pairingSocket: "/run/lucy/pairing.sock"
 ```
 
 ## 故障排查

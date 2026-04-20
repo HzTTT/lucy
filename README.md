@@ -45,19 +45,13 @@ openclaw lucy reset-state
 }
 ```
 
-如需本地 USB 通知事件回报：
+本地 USB 通知默认开启并监听 `http://127.0.0.1:8000/usb-events`；只有显式关掉时才需要配置：
 
 ```json
 {
   "channels": {
     "lucy": {
-      "enabled": true,
-      "localNotify": {
-        "enabled": true,
-        "bind": "127.0.0.1",
-        "port": 8788,
-        "path": "/usb-events"
-      }
+      "localNotify": { "enabled": false }
     }
   }
 }

@@ -7,9 +7,13 @@ import {
   DEFAULT_LOCAL_NOTIFY_BIND,
   DEFAULT_LOCAL_NOTIFY_PATH,
   DEFAULT_LOCAL_NOTIFY_PORT,
+  DEFAULT_LUCY_SERVER_DOMAIN,
   DEFAULT_MAX_ATTACHMENTS,
+  DEFAULT_MEDIA_LOCAL_ROOTS,
   DEFAULT_MEDIA_MAX_MB,
+  DEFAULT_PAIRING_SOCKET,
   DEFAULT_SUBJECT_PREFIX,
+  DEFAULT_USER_CENTER_DOMAIN,
   SUBJECT_TOKEN_RE,
   type LucyConfig,
   type ResolvedLucyAccount,
@@ -45,16 +49,22 @@ export function isValidLocalNotifyPath(value: string | undefined): boolean {
 }
 
 function resolveLucyLocalNotify(raw: LucyConfig): ResolvedLucyAccount["localNotify"] {
-  const section = raw.localNotify;
-  if (!section || typeof section !== "object" || Array.isArray(section) || section.enabled === false) {
+  const rawSection = raw.localNotify;
+  const section =
+    rawSection && typeof rawSection === "object" && !Array.isArray(rawSection)
+      ? rawSection
+      : undefined;
+
+  // Default is enabled; only an explicit `enabled: false` disables local notify.
+  if (section?.enabled === false) {
     return undefined;
   }
 
   return {
     enabled: true,
-    bind: section.bind?.trim() || DEFAULT_LOCAL_NOTIFY_BIND,
-    port: section.port ?? DEFAULT_LOCAL_NOTIFY_PORT,
-    path: normalizeLocalNotifyPath(section.path) ?? DEFAULT_LOCAL_NOTIFY_PATH,
+    bind: section?.bind?.trim() || DEFAULT_LOCAL_NOTIFY_BIND,
+    port: section?.port ?? DEFAULT_LOCAL_NOTIFY_PORT,
+    path: normalizeLocalNotifyPath(section?.path) ?? DEFAULT_LOCAL_NOTIFY_PATH,
   };
 }
 
@@ -76,18 +86,23 @@ export function resolveLucyAccount(
 ): ResolvedLucyAccount {
   const raw = resolveLucyConfig(cfg);
   const localNotify = resolveLucyLocalNotify(raw);
-  const userCenterDomain = raw.userCenterDomain?.trim() || "";
-  const lucyServerDomain = raw.lucyServerDomain?.trim() || "";
+  const userCenterDomain = raw.userCenterDomain?.trim() || DEFAULT_USER_CENTER_DOMAIN;
+  const lucyServerDomain = raw.lucyServerDomain?.trim() || DEFAULT_LUCY_SERVER_DOMAIN;
   const homeDir = raw.homeDir?.trim() || DEFAULT_HOME_DIR;
   const deviceType = raw.deviceType?.trim() || DEFAULT_DEVICE_TYPE;
   const subjectPrefix = raw.subjectPrefix?.trim() || DEFAULT_SUBJECT_PREFIX;
   const mediaMaxMb = raw.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
-  const mediaLocalRoots = raw.mediaLocalRoots?.map((entry) => entry.trim()).filter(Boolean);
+  // Only fall back to the built-in default when the field is entirely
+  // unset. An explicit empty array keeps the "disable all file:// URLs"
+  // opt-out available for operators who want that semantic.
+  const mediaLocalRoots = raw.mediaLocalRoots
+    ? raw.mediaLocalRoots.map((entry) => entry.trim()).filter(Boolean)
+    : [...DEFAULT_MEDIA_LOCAL_ROOTS];
   const restartHelperCommand = raw.restartHelperCommand?.trim() || undefined;
   const restartHelperArgs = raw.restartHelperArgs?.map((entry) => entry.trim()).filter(Boolean);
   const restartOnlineTimeoutMs = raw.restartOnlineTimeoutMs;
   const allowFrom = raw.allowFrom?.map((entry) => entry.trim()).filter(Boolean) ?? [];
-  const pairingSocket = raw.pairingSocket?.trim() || undefined;
+  const pairingSocket = raw.pairingSocket?.trim() || DEFAULT_PAIRING_SOCKET;
 
   const configured =
     Boolean(userCenterDomain) &&

@@ -1,4 +1,4 @@
-<!-- 最后核对：代码版本 ai-npc@2026-04-16，以 src/types.ts LucyConfigSchema 为事实源 -->
+<!-- 最后核对：代码版本 ai-npc@2026-04-20，以 src/types.ts LucyConfigSchema 为事实源 -->
 
 # 配置参考
 
@@ -12,22 +12,22 @@
 | `channels.lucy.name` | string | — | 频道显示名称（可选） |
 | `channels.lucy.deviceType` | string | `"cloud"` | 设备类型，上报给 user-center 的 `POST /v1/devices/new` type 字段（`ai_npc` / `claw_pi` / `cloud`，SDK 不校验） |
 | `channels.lucy.homeDir` | string | `~/.lucy/identity/` | SDK 身份数据目录 |
-| `channels.lucy.userCenterDomain` | string | — | user-center API 域名（必填） |
-| `channels.lucy.lucyServerDomain` | string | — | lucy-server 域名（必填） |
+| `channels.lucy.userCenterDomain` | string | `"https://prod.unicorn.org.cn/cephalon/user-center"` | user-center API 域名 |
+| `channels.lucy.lucyServerDomain` | string | `"https://prod.unicorn.org.cn/aiden/lucy-server"` | lucy-server 域名 |
 | `channels.lucy.subjectPrefix` | string | `"cephalon.im.npc"` | NATS 主题前缀 |
 | `channels.lucy.dmPolicy` | `"allowlist"` \| `"open"` \| `"disabled"` | `"allowlist"` | DM 访问策略 |
 | `channels.lucy.allowFrom` | string[] | `[]` | allowlist 策略下允许的用户 ID 列表 |
 | `channels.lucy.mediaMaxMb` | number | `20` | 单个媒体文件最大 MB 数 |
 | `channels.lucy.maxAttachments` | number | `10` | 单条消息最大附件数（上限 20） |
-| `channels.lucy.mediaLocalRoots` | string[] | — | 允许出站的本地文件路径前缀白名单 |
-| `channels.lucy.localNotify.enabled` | boolean | `true` | 启用 USB 本地通知 HTTP 服务 |
+| `channels.lucy.mediaLocalRoots` | string[] | `["/home/lucy"]` | 允许出站的本地文件路径前缀白名单 |
+| `channels.lucy.localNotify.enabled` | boolean | `true` | 启用 USB 本地通知 HTTP 服务（默认开启；显式 `false` 才禁用） |
 | `channels.lucy.localNotify.bind` | string | `"127.0.0.1"` | 本地通知监听地址 |
-| `channels.lucy.localNotify.port` | number | `8788` | 本地通知监听端口 |
+| `channels.lucy.localNotify.port` | number | `8000` | 本地通知监听端口 |
 | `channels.lucy.localNotify.path` | string | `"/usb-events"` | 本地通知 HTTP 路径 |
 | `channels.lucy.restartHelperCommand` | string | — | 自动重启时执行的命令（覆盖默认重启行为） |
 | `channels.lucy.restartHelperArgs` | string[] | — | 重启命令的参数列表 |
 | `channels.lucy.restartOnlineTimeoutMs` | number | — | 重启后等待网关上线的超时时长（毫秒） |
-| `channels.lucy.pairingSocket` | string | — | blue-wifi IPC Unix domain socket 绝对路径 |
+| `channels.lucy.pairingSocket` | string | `"/run/lucy/pairing.sock"` | blue-wifi IPC Unix domain socket 绝对路径 |
 
 ## 详细说明
 
@@ -88,25 +88,25 @@ channels:
 #### channels.lucy.userCenterDomain
 
 - **类型**：`string`（HTTPS URL）
-- **默认值**：无（必填）
-- **说明**：user-center 服务的 API 域名。SDK 会向该域名发起设备注册、绑定轮询、模型配置查询
+- **默认值**：`"https://prod.unicorn.org.cn/cephalon/user-center"`（生产环境 user-center）
+- **说明**：user-center 服务的 API 域名。SDK 会向该域名发起设备注册、绑定轮询、模型配置查询。仅在指向测试/私有环境时才需要覆盖
 
 ```yaml
 channels:
   lucy:
-    userCenterDomain: "https://user.npc.im"
+    userCenterDomain: "https://test.unicorn.org.cn/cephalon/user-center"
 ```
 
 #### channels.lucy.lucyServerDomain
 
 - **类型**：`string`（HTTPS URL）
-- **默认值**：无（必填）
-- **说明**：lucy-server 服务的 API 域名。SDK 会向该域名申请 OTP、轮询绑定状态、交换 NATS token
+- **默认值**：`"https://prod.unicorn.org.cn/aiden/lucy-server"`（生产环境 lucy-server）
+- **说明**：lucy-server 服务的 API 域名。SDK 会向该域名申请 OTP、轮询绑定状态、交换 NATS token。仅在指向测试/私有环境时才需要覆盖
 
 ```yaml
 channels:
   lucy:
-    lucyServerDomain: "https://npc.im"
+    lucyServerDomain: "https://test.unicorn.org.cn/aiden/lucy-server"
 ```
 
 #### channels.lucy.subjectPrefix
@@ -170,15 +170,15 @@ channels:
 #### channels.lucy.mediaLocalRoots
 
 - **类型**：`string[]`
-- **默认值**：无（未设置时使用内置白名单）
-- **说明**：允许 Lucy 读取并上传的本地文件路径前缀列表。用于出站附件的路径白名单校验
+- **默认值**：`["/home/lucy"]`（Lucy 设备用户家目录）
+- **说明**：允许 Lucy 读取并上传的本地文件路径前缀列表。用于出站附件的路径白名单校验。显式配置后会完全覆盖默认值；空数组同样会回退到默认，请按需调整
 
 ```yaml
 channels:
   lucy:
     mediaLocalRoots:
-      - "/home/user/documents/"
-      - "/tmp/openclaw-attachments/"
+      - "/home/lucy"
+      - "/tmp/openclaw-attachments"
 ```
 
 ### USB 本地通知配置
@@ -186,14 +186,14 @@ channels:
 #### channels.lucy.localNotify.enabled
 
 - **类型**：`boolean`
-- **默认值**：`true`
-- **说明**：启用后，Lucy 会在启动时创建本地 HTTP 服务器，监听 USB 事件通知
+- **默认值**：`true`（opt-out；只有显式设为 `false` 才禁用）
+- **说明**：启用后，Lucy 会在启动时创建本地 HTTP 服务器，监听 USB 事件通知。即使未声明 `localNotify` 段也会按默认值启动
 
 ```yaml
 channels:
   lucy:
     localNotify:
-      enabled: true
+      enabled: false   # 仅在这里显式设为 false 时才禁用
 ```
 
 #### channels.lucy.localNotify.bind
@@ -212,17 +212,17 @@ channels:
 #### channels.lucy.localNotify.port
 
 - **类型**：`number`（1–65535）
-- **默认值**：`8788`
+- **默认值**：`8000`
 - **说明**：本地通知 HTTP 服务器监听端口。若被占用，启动会失败，需要更改或释放端口
 
 ```yaml
 channels:
   lucy:
     localNotify:
-      port: 8788
+      port: 8000
 ```
 
-**完整 URL**：`http://127.0.0.1:8788/usb-events`
+**完整 URL**：`http://127.0.0.1:8000/usb-events`
 
 #### channels.lucy.localNotify.path
 
@@ -270,8 +270,8 @@ channels:
 #### channels.lucy.pairingSocket
 
 - **类型**：`string`（Unix domain socket 绝对路径）
-- **默认值**：无（不启用 IPC）
-- **说明**：blue-wifi IPC Unix domain socket 的绝对路径。设置后，Lucy 在待绑定状态会通过该 socket 与 blue-wifi 代理通信，提供 OTP 和绑定事件。父目录必须存在且可写
+- **默认值**：`"/run/lucy/pairing.sock"`（Lucy 设备 blue-wifi 约定路径）
+- **说明**：blue-wifi IPC Unix domain socket 的绝对路径。默认情况下 Lucy 在待绑定状态会通过该 socket 与 blue-wifi 代理通信，提供 OTP 和绑定事件。若在无 blue-wifi 的环境下运行（例如开发机），socket 连接失败不会阻塞启动，可自行覆盖路径或在其他环境中忽略
 
 ```yaml
 channels:
@@ -283,16 +283,15 @@ channels:
 
 ### 最小配置（生产推荐）
 
+默认值已覆盖生产 user-center/lucy-server、localNotify、pairingSocket、mediaLocalRoots，最小可用配置只需启用频道：
+
 ```yaml
 channels:
   lucy:
     enabled: true
-    homeDir: "~/.lucy/identity/"
-    userCenterDomain: "https://user.npc.im"
-    lucyServerDomain: "https://npc.im"
 ```
 
-### 完整配置（含所有常用选项）
+### 完整配置（显式声明所有字段）
 
 ```yaml
 channels:
@@ -300,19 +299,21 @@ channels:
     enabled: true
     deviceType: "ai_npc"
     homeDir: "~/.lucy/identity/"
-    userCenterDomain: "https://user.npc.im"
-    lucyServerDomain: "https://npc.im"
+    userCenterDomain: "https://prod.unicorn.org.cn/cephalon/user-center"
+    lucyServerDomain: "https://prod.unicorn.org.cn/aiden/lucy-server"
     dmPolicy: "allowlist"
     allowFrom:
       - "user_id_1"
     mediaMaxMb: 20
     maxAttachments: 10
+    mediaLocalRoots:
+      - "/home/lucy"
     localNotify:
       enabled: true
       bind: "127.0.0.1"
-      port: 8788
+      port: 8000
       path: "/usb-events"
-    pairingSocket: "/var/run/lucy/pairing.sock"
+    pairingSocket: "/run/lucy/pairing.sock"
 ```
 
 ### 开发配置
@@ -322,12 +323,12 @@ channels:
   lucy:
     enabled: true
     homeDir: "/tmp/lucy-identity/"
-    userCenterDomain: "https://dev.user.npc.im"
-    lucyServerDomain: "https://dev.npc.im"
+    userCenterDomain: "https://test.unicorn.org.cn/cephalon/user-center"
+    lucyServerDomain: "https://test.unicorn.org.cn/aiden/lucy-server"
     dmPolicy: "open"
     localNotify:
       enabled: true
-      port: 8788
+      port: 8000
     pairingSocket: "/tmp/lucy-pairing.sock"
 ```
 
@@ -358,9 +359,9 @@ chmod 600 /var/run/lucy/pairing.sock
 
 | 问题 | 配置检查 |
 |------|---------|
-| Lucy 启动失败，提示 `userCenterDomain is required` | 确保 `userCenterDomain` 已设置且非空 |
-| Lucy 启动失败，提示 `lucyServerDomain is required` | 确保 `lucyServerDomain` 已设置且非空 |
-| 本地通知端口被占用 | 更改 `localNotify.port`（默认 8788）或释放端口 |
+| Lucy 启动失败，提示 `userCenterDomain is required` | 仅当显式把字段设成空字符串才会触发；正常情况下默认值会自动生效 |
+| Lucy 启动失败，提示 `lucyServerDomain is required` | 同上 |
+| 本地通知端口被占用 | 更改 `localNotify.port`（默认 8000）或释放端口 |
 | user-center 连接超时 | 验证 `userCenterDomain` 和网络连通性 |
 | IPC socket 连接失败 | 确认 `pairingSocket` 路径存在且父目录可写 |
 | 消息被拒绝（inbound.rejected） | 检查 `dmPolicy` 和 `allowFrom` 配置 |

@@ -113,9 +113,16 @@ openclaw config get channels.lucy
 
 ### 修改 Lucy 配置
 
+多数字段已内置生产默认值（见 [config-reference](./config-reference.md)），仅当需要覆盖时才调用 `config set`。示例：
+
 ```bash
-openclaw config set channels.lucy.localNotify.enabled true
-openclaw config set channels.lucy.localNotify.port 8788
+# 关闭 USB 本地通知（仅此一种写法会禁用，默认是开启）
+openclaw config set channels.lucy.localNotify.enabled false
+
+# 只改端口；bind/path 仍走默认
+openclaw config set channels.lucy.localNotify.port 8000
+
+# 指向自定义 pairing socket
 openclaw config set channels.lucy.pairingSocket /var/run/lucy/pairing.sock
 ```
 

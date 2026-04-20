@@ -30,6 +30,25 @@ describe("lucy config", () => {
     expect(account.maxAttachments).toBe(10);
   });
 
+  it("applies production defaults when channels.lucy is missing", () => {
+    const account = resolveLucyAccount({} as OpenClawConfig, "default");
+    expect(account.userCenterDomain).toBe(
+      "https://prod.unicorn.org.cn/cephalon/user-center",
+    );
+    expect(account.lucyServerDomain).toBe(
+      "https://prod.unicorn.org.cn/aiden/lucy-server",
+    );
+    expect(account.pairingSocket).toBe("/run/lucy/pairing.sock");
+    expect(account.mediaLocalRoots).toEqual(["/home/lucy"]);
+    expect(account.localNotify).toEqual({
+      enabled: true,
+      bind: "127.0.0.1",
+      port: 8000,
+      path: "/usb-events",
+    });
+    expect(account.configured).toBe(true);
+  });
+
   it("keeps configured mediaLocalRoots for outbound local media sends", () => {
     const account = resolveLucyAccount(
       {
@@ -66,10 +85,26 @@ describe("lucy config", () => {
     expect(account.localNotify).toEqual({
       enabled: true,
       bind: "127.0.0.1",
-      port: 8788,
+      port: 8000,
       path: "/usb-events",
     });
     expect(account.configured).toBe(true);
+  });
+
+  it("respects explicit localNotify.enabled=false opt-out", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            userCenterDomain: "user-center.lucy.run",
+            lucyServerDomain: "chat.lucy.run",
+            localNotify: { enabled: false },
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+    expect(account.localNotify).toBeUndefined();
   });
 
   it("treats invalid local notify ports as unconfigured", () => {
@@ -93,7 +128,7 @@ describe("lucy config", () => {
     expect(unconfiguredLucyReason(account)).toContain("localNotify.port");
   });
 
-  it("treats missing userCenterDomain as unconfigured", () => {
+  it("fills in production default for missing userCenterDomain", () => {
     const account = resolveLucyAccount(
       {
         channels: {
@@ -104,8 +139,53 @@ describe("lucy config", () => {
       } as OpenClawConfig,
       "default",
     );
-    expect(account.configured).toBe(false);
-    expect(unconfiguredLucyReason(account)).toContain("userCenterDomain");
+    expect(account.userCenterDomain).toBe(
+      "https://prod.unicorn.org.cn/cephalon/user-center",
+    );
+    expect(account.lucyServerDomain).toBe("chat.lucy.run");
+    expect(account.configured).toBe(true);
+  });
+
+  it("keeps an explicit empty mediaLocalRoots as an opt-out (not default)", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            mediaLocalRoots: [],
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+    expect(account.mediaLocalRoots).toEqual([]);
+  });
+
+  it("keeps configured mediaLocalRoots overriding the default", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            mediaLocalRoots: ["/srv/lucy-media"],
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+    expect(account.mediaLocalRoots).toEqual(["/srv/lucy-media"]);
+  });
+
+  it("respects explicit pairingSocket override", () => {
+    const account = resolveLucyAccount(
+      {
+        channels: {
+          lucy: {
+            pairingSocket: "/tmp/custom.sock",
+          },
+        },
+      } as OpenClawConfig,
+      "default",
+    );
+    expect(account.pairingSocket).toBe("/tmp/custom.sock");
   });
 
   it("validates subject tokens", () => {
