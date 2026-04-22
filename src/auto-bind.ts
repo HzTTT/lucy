@@ -1,34 +1,10 @@
 import { createHash } from "node:crypto";
+import type { AutoBindEnvConfig } from "./auto-bind-env.js";
 
 export const DEFAULT_AUTO_BIND_MAX_ATTEMPTS = 3;
 export const DEFAULT_AUTO_BIND_RETRY_DELAY_MS = 2_000;
 
-export interface AutoBindEnvConfig {
-  userId: string;
-  missionId: string;
-  secret: string;
-}
-
-/**
- * Reads the three env vars that trigger the auto-bind path. All three must be
- * present (non-empty) or the function returns undefined — meaning the caller
- * should fall back to the interactive OTP / pairing IPC binding path.
- *
- *   LUCY_USER_ID     — target user_id to bind this device to
- *   LUCY_MISSION_ID  — mission_id to pre-associate (required when deviceType=cloud)
- *   LUCY_BIND_SECRET — shared secret for the md5(secret+timestamp) sign query
- */
-export function readAutoBindEnvConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): AutoBindEnvConfig | undefined {
-  const userId = env.LUCY_USER_ID?.trim();
-  const missionId = env.LUCY_MISSION_ID?.trim();
-  const secret = env.LUCY_BIND_SECRET?.trim();
-  if (!userId || !missionId || !secret) {
-    return undefined;
-  }
-  return { userId, missionId, secret };
-}
+export type { AutoBindEnvConfig };
 
 export function signBindRequest(secret: string, timestamp: number | string): string {
   return createHash("md5").update(`${secret}${timestamp}`).digest("hex");

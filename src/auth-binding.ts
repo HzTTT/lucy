@@ -1,6 +1,7 @@
 import { LucyImClient, type LucyImConfig } from "lucy-im-sdk";
 import type { ConnectedClient } from "lucy-im-sdk";
-import { readAutoBindEnvConfig, tryAutoBindWithRetry } from "./auto-bind.js";
+import { readAutoBindEnvConfig } from "./auto-bind-env.js";
+import { tryAutoBindWithRetry } from "./auto-bind.js";
 
 /**
  * Waits until the Lucy device is bound to a user and returns the resolved

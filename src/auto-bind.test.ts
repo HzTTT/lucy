@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   autoBindByEnv,
-  readAutoBindEnvConfig,
   signBindRequest,
   tryAutoBindWithRetry,
 } from "./auto-bind.js";
+import { readAutoBindEnvConfig } from "./auto-bind-env.js";
 
 describe("readAutoBindEnvConfig", () => {
   it("returns undefined when any of the three vars is missing or empty", () => {
