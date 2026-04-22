@@ -1,5 +1,6 @@
 import { LucyImClient, type LucyImConfig } from "lucy-im-sdk";
 import type { ConnectedClient } from "lucy-im-sdk";
+import { readAutoBindEnvConfig, tryAutoBindWithRetry } from "./auto-bind.js";
 
 /**
  * Waits until the Lucy device is bound to a user and returns the resolved
@@ -50,9 +51,38 @@ export async function syncLucyBindingWithSdk(params: {
     throw new Error("Lucy device not bound and waitForBinding=false");
   }
 
-  params.onPendingBind?.(client);
+  // Auto-bind path: if LUCY_USER_ID / LUCY_MISSION_ID / LUCY_BIND_SECRET are
+  // all set, call user-center POST /v1/devices/bind directly instead of the
+  // interactive OTP / pairing-IPC flow. On success, pollBinding() below will
+  // pick up the bound state on the next tick. On failure after retries we
+  // fall through to the interactive path unchanged.
+  const autoBindEnv = readAutoBindEnvConfig();
+  let autoBindSucceeded = false;
+  if (autoBindEnv) {
+    params.log?.info?.(
+      `[lucy] auto-bind env detected; POST /v1/devices/bind (cdi=${init.cdi}, user_id=${autoBindEnv.userId}, mission_id=${autoBindEnv.missionId})`,
+    );
+    const outcome = await tryAutoBindWithRetry({
+      userCenterDomain: params.cfg.userCenterDomain,
+      cdi: init.cdi,
+      env: autoBindEnv,
+      signal: params.signal,
+      log: params.log,
+    });
+    if (outcome.ok) {
+      autoBindSucceeded = true;
+    } else {
+      params.log?.warn?.(
+        `[lucy] auto-bind failed after retries: ${outcome.reason}; falling back to interactive binding`,
+      );
+    }
+  }
+
+  if (!autoBindSucceeded) {
+    params.onPendingBind?.(client);
+  }
   params.log?.info?.(
-    `[lucy] device pending bind (cdi=${init.cdi}); waiting for user to complete binding`,
+    `[lucy] device pending bind (cdi=${init.cdi}); waiting for binding to complete`,
   );
 
   const pollIntervalMs = params.pollIntervalMs ?? 2_000;
