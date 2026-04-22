@@ -1,3 +1,4 @@
+import { access, constants as fsConstants } from "node:fs/promises";
 import { Socket, createConnection } from "node:net";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import type { LucyImClient } from "lucy-im-sdk";
@@ -278,11 +279,7 @@ export function startPairingIpcClient(
     }
   };
 
-  const openConnection = (): void => {
-    if (stopped || connection) {
-      return;
-    }
-
+  const openSocket = (): void => {
     const socket = createConnection({ path: params.sockPath });
     const readline = createInterface({ input: socket, crlfDelay: Infinity });
     const conn: Connection = { socket, readline, ready: false };
@@ -295,7 +292,9 @@ export function startPairingIpcClient(
       armHeartbeat(conn);
     });
 
-    socket.once("error", (err) => {
+    // `on` rather than `once`: a destroyed socket can re-emit error during
+    // teardown, and a second unhandled 'error' event would crash the process.
+    socket.on("error", (err) => {
       // Swallow ENOENT / ECONNREFUSED noise — these are expected when
       // blue-wifi is not running yet.
       log.info?.(`[lucy] pairing-ipc: socket error: ${err.message}`);
@@ -328,6 +327,37 @@ export function startPairingIpcClient(
         log.error?.(`[lucy] pairing-ipc: handler crashed: ${String(err)}`);
       }
     });
+  };
+
+  const openConnection = (): void => {
+    if (stopped || connection) {
+      return;
+    }
+
+    // Precheck the socket path before calling createConnection. A missing
+    // socket triggers an ENOENT whose async emit path (combined with
+    // readline.createInterface's synchronous wiring to the socket stream)
+    // bypasses the socket 'error' listener and surfaces as an uncaught
+    // exception — bringing the whole gateway down. This is the normal state
+    // on macOS / dev machines without a blue-wifi BLE agent, so log once and
+    // schedule another retry instead.
+    access(params.sockPath, fsConstants.F_OK).then(
+      () => {
+        if (stopped || connection) {
+          return;
+        }
+        openSocket();
+      },
+      (err: NodeJS.ErrnoException) => {
+        if (stopped) {
+          return;
+        }
+        log.info?.(
+          `[lucy] pairing-ipc: socket not available at ${params.sockPath} (${err?.code ?? "ENOENT"}); will retry later`,
+        );
+        scheduleReconnect();
+      },
+    );
   };
 
   const onAbort = (): void => {
