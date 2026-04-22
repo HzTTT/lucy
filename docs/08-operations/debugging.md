@@ -169,12 +169,8 @@ Channel: lucy
 # 1. 确认 Lucy 已绑定
 openclaw channels status --probe | grep "binding_state"
 
-# 2. 模拟发送消息（手动或通过 demo-chat.ts）
-pnpm exec tsx extensions/lucy/scripts/demo-chat.ts \
-  --channel-user-key <cuk> \
-  --channel-device-id <cdi> \
-  --text "test message" \
-  --wait-ms 25000
+# 2. 模拟 user-side 客户端发送消息并捕获事件流
+LUCY_PROBE_PROMPT="test message" pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts
 
 # 3. 实时观看日志
 openclaw gateway logs --follow --grep "inbound\|assistant"

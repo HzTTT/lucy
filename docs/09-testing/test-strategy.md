@@ -72,48 +72,64 @@ docker compose -f extensions/lucy/docker-compose.nats.yml up -d nats
 
 **预期状态**：绿色（通过）
 
-### 第 3 层：E2E 脚本（手动或脚本化）
+### 第 3 层：E2E 脚本（user-side 客户端模拟）
 
-**范围**：完整的绑定、消息、模型供应流程，与真实的 App 或 NATS 交互
+**范围**：模拟 iOS 客户端走完整路径 — user-center 密码登录 → lucy-server 申请 user-side NATS token → NATS core sub 出站 / JetStream pub 入站，验证 lucy gateway 完整事件流（含 `assistant.complete` 收尾契约）
 
-**脚本**：`extensions/lucy/scripts/*.ts`
+**前置条件**：
+
+1. lucy gateway 已绑定：`ls ~/.lucy/identity/channel_ids/` 含 `cdi`、`cuk`、`user_id`
+2. gateway 与 probe 在同一环境（默认 test）。若 gateway 配的是 prod，要么改 `~/.openclaw/openclaw.json` 的 `channels.lucy.userCenterDomain` 和 `lucyServerDomain` 切到 test，要么用 env var 让 probe 切到 prod
 
 **关键脚本**：
 
 | 脚本 | 用途 | 命令 |
 |------|------|------|
 | `auth-qrcode.ts` | 生成绑定 QR 码 | `pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json` |
-| `demo-chat.ts` | 模拟 App 发送消息 | `pnpm exec tsx extensions/lucy/scripts/demo-chat.ts --channel-user-key <cuk> --channel-device-id <cdi> --text "test" --wait-ms 25000` |
-| `e2e-probe.mjs` | 完整的绑定→消息→模型流程 | `node extensions/lucy/scripts/e2e-probe.mjs` |
+| `assistant-complete-probe.ts` | **协议契约验证（推荐入口）**：发一条入站消息后捕获事件流，验证 `assistant.complete` 是最后一个事件 | `pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts` |
+| `e2e-probe.mjs` | 6 个内置测试用例（plain reply、reasoning、tool use 等）针对独立 home `/tmp/lucy-test/identity/` | `node extensions/lucy/scripts/e2e-probe.mjs` |
+| `correlation-probe.mjs` | 关联性验证：同一 inbound 的所有事件必须带相同 `source_message_id` | `node extensions/lucy/scripts/correlation-probe.mjs` |
+| `consumer-info.mjs` | JetStream 消费者状态：stream `IM_NPC` + durable `npc-<cdi>` 的 pending/ack 序号 | `node extensions/lucy/scripts/consumer-info.mjs` |
+
+**`assistant-complete-probe.ts` 工作流**：
+
+1. 读 `~/.lucy/identity/channel_ids/{cdi,user_id}` 拿到 gateway 当前绑定
+2. `POST /v1/login`（user-center）用 phone+pwd 拿 user session token
+3. `POST /v1/channels/lucy/nats/token/user`（lucy-server）带 `Authorization: Bearer <token>` + `{"client_id": "..."}` 拿 user-side NATS token
+4. NATS connect with token → core sub `cephalon.im.user.<user_id>` → JetStream pub `cephalon.im.npc.<user_id>.<cdi>`
+5. 收到 `assistant.complete` 后等 3s grace window，断言它是最后事件 + 唯一一个 + `runId` 匹配
 
 **运行示例**：
 
 ```bash
-# 1. 生成 QR 码（需要 Lucy gateway 运行）
-pnpm exec tsx extensions/lucy/scripts/auth-qrcode.ts --json
+# 默认 test 环境 + 内置 test 账号
+pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts
 
-# 2. 在 App 中扫码绑定（模拟）
-# ... 用 Lucy iOS Demo App 或在线扫码工具
+# 自定义 prompt
+LUCY_PROBE_PROMPT="reply with exactly: HELLO" \
+  pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts
 
-# 3. 发送消息并等待回复
-pnpm exec tsx extensions/lucy/scripts/demo-chat.ts \
-  --channel-user-key "test-cuk" \
-  --channel-device-id "test-cdi" \
-  --text "Replicate the words: LUCY_E2E_OK" \
-  --wait-ms 25000
-
-# 4. 检查回复
+# 切到 prod
+LUCY_PROBE_USER_CENTER=https://prod.unicorn.org.cn/cephalon/user-center \
+LUCY_PROBE_LUCY_SERVER=https://prod.unicorn.org.cn/aiden/lucy-server \
+LUCY_PROBE_PHONE=<prod-phone> LUCY_PROBE_PWD=<prod-pwd> \
+  pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts
 ```
 
-**预期输出**：
+**预期事件流（happy path）**：
 
-```json
-{
-  "success": true,
-  "message": "E2E test completed successfully",
-  "roundTripTimeMs": 5234
-}
 ```
+inbound.accepted → assistant.start → assistant.partial × N → assistant.final → assistant.complete
+```
+
+输出末尾：
+
+```
+[probe] VERDICT: PASS - exactly 1 assistant.complete is the LAST event (1 assistant.final blocks before it)
+[probe] complete carries: sourceMessageId=... runId=... eventId=...
+```
+
+**注意 — `assistant.complete` 契约**：每个 inbound run 必须以恰好 1 个 `assistant.complete` 收尾。无论 happy path、block error（被 dispatcher `onError` 消化）、还是 fatal dispatcher throw，都不会有任何事件出现在 complete 之后。fatal 路径下事件流是 `... → error → assistant.complete`。
 
 ## 运行完整的测试套件
 
@@ -127,8 +143,8 @@ vitest run --config vitest.extensions.config.ts "extensions/lucy/src/*.test.ts"
 # 3. 类型检查
 pnpm exec tsc --noEmit --skipLibCheck extensions/lucy/index.ts extensions/lucy/src/*.ts
 
-# 4. E2E 脚本（可选）
-pnpm exec tsx extensions/lucy/scripts/demo-chat.ts ...
+# 4. E2E 协议验证（可选，需 gateway 运行 + 已绑定）
+pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts
 ```
 
 **总耗时**：< 30 秒（仅单元 + 集成）

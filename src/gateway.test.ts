@@ -158,7 +158,8 @@ describe("handleLucyInboundMessage", () => {
       cdi: "2080563661542787073",
     });
 
-    expect(publishSpy.mock.calls.map(([params]) => params.type)).toEqual(
+    const types = publishSpy.mock.calls.map(([params]) => params.type);
+    expect(types).toEqual(
       expect.arrayContaining([
         "inbound.accepted",
         "tool.start",
@@ -168,8 +169,192 @@ describe("handleLucyInboundMessage", () => {
         "reasoning.partial",
         "reasoning.final",
         "assistant.final",
+        "assistant.complete",
       ]),
     );
+    expect(types[types.length - 1]).toBe("assistant.complete");
+    const completeCall = publishSpy.mock.calls.find(
+      ([params]) => params.type === "assistant.complete",
+    )?.[0];
+    expect(completeCall).toMatchObject({
+      sourceMessageId: expect.any(String),
+      runId: "run-1",
+    });
+  });
+
+  it("emits assistant.complete in finally even when dispatcher throws", async () => {
+    const recordInboundSession = vi.fn(async () => undefined);
+    const runtime = {
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          accountId: "default",
+        })),
+      },
+      reply: {
+        formatAgentEnvelope: vi.fn(({ body }) => body),
+        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+        finalizeInboundContext: vi.fn((ctx) => ctx),
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(async ({ replyOptions }) => {
+          replyOptions?.onAgentRunStart?.("run-err");
+          throw new Error("upstream provider 401");
+        }),
+      },
+      media: { saveMediaBuffer: vi.fn() },
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/lucy-session.jsonl"),
+        recordInboundSession,
+      },
+    } as unknown as PluginRuntime["channel"];
+    const session = createMockSession();
+
+    await expect(
+      handleLucyInboundMessage({
+        cfg: {
+          channels: { lucy: { userCenterDomain: "user-center.lucy.run" } },
+        } as OpenClawConfig,
+        account: createAccount(),
+        channelRuntime: runtime,
+        inbound: { version: 1, text: "hi" },
+        session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+        userId: "user_demo",
+        cuk: "cuk_demo_user",
+        cdi: "2080563661542787073",
+      }),
+    ).rejects.toThrow("upstream provider 401");
+
+    const types = publishSpy.mock.calls.map(([params]) => params.type);
+    expect(types[types.length - 1]).toBe("assistant.complete");
+    // Contract: error event must be emitted BEFORE assistant.complete so the
+    // last event for any inbound run is always assistant.complete.
+    const errorIdx = types.lastIndexOf("error");
+    const completeIdx = types.lastIndexOf("assistant.complete");
+    expect(errorIdx).toBeGreaterThanOrEqual(0);
+    expect(errorIdx).toBeLessThan(completeIdx);
+    const errorCall = publishSpy.mock.calls.find(
+      ([params]) => params.type === "error",
+    )?.[0];
+    expect(errorCall).toMatchObject({
+      runId: "run-err",
+      sourceMessageId: expect.any(String),
+    });
+    const completeCall = publishSpy.mock.calls.find(
+      ([params]) => params.type === "assistant.complete",
+    )?.[0];
+    expect(completeCall).toMatchObject({ runId: "run-err" });
+  });
+
+  it("pairs every tool.start with a tool.end on consecutive tool calls", async () => {
+    const recordInboundSession = vi.fn(async () => undefined);
+    const runtime = {
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          accountId: "default",
+        })),
+      },
+      reply: {
+        formatAgentEnvelope: vi.fn(({ body }) => body),
+        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+        finalizeInboundContext: vi.fn((ctx) => ctx),
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(
+          async ({ replyOptions, dispatcherOptions }) => {
+            replyOptions?.onAgentRunStart?.("run-tools");
+            // Two consecutive tool calls without an intervening assistant
+            // message, then a third tool call after a message, then end.
+            await replyOptions?.onToolStart?.({ name: "tool_a", phase: "start" });
+            await replyOptions?.onToolStart?.({ name: "tool_b", phase: "start" });
+            await replyOptions?.onAssistantMessageStart?.();
+            await replyOptions?.onToolStart?.({ name: "tool_c", phase: "start" });
+            await dispatcherOptions.deliver({ text: "done" });
+            return { counts: {} };
+          },
+        ),
+      },
+      media: { saveMediaBuffer: vi.fn() },
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/lucy-session.jsonl"),
+        recordInboundSession,
+      },
+    } as unknown as PluginRuntime["channel"];
+    const session = createMockSession();
+
+    await handleLucyInboundMessage({
+      cfg: {
+        channels: { lucy: { userCenterDomain: "user-center.lucy.run" } },
+      } as OpenClawConfig,
+      account: createAccount(),
+      channelRuntime: runtime,
+      inbound: { version: 1, text: "trigger consecutive tools" },
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
+    });
+
+    const types = publishSpy.mock.calls.map(([params]) => params.type);
+    const startCount = types.filter((t) => t === "tool.start").length;
+    const endCount = types.filter((t) => t === "tool.end").length;
+    expect(startCount).toBe(3);
+    expect(endCount).toBe(3);
+    expect(types[types.length - 1]).toBe("assistant.complete");
+  });
+
+  it("emits one assistant.final per delivered block but exactly one assistant.complete at the end", async () => {
+    const recordInboundSession = vi.fn(async () => undefined);
+    const runtime = {
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          accountId: "default",
+        })),
+      },
+      reply: {
+        formatAgentEnvelope: vi.fn(({ body }) => body),
+        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+        finalizeInboundContext: vi.fn((ctx) => ctx),
+        dispatchReplyWithBufferedBlockDispatcher: vi.fn(
+          async ({ replyOptions, dispatcherOptions }) => {
+            replyOptions?.onAgentRunStart?.("run-multi");
+            // Mirror real "media + text" multi-block flow: dispatcher
+            // delivers the media block immediately, then the text block at
+            // the end. Each deliver() should emit its own assistant.final.
+            await dispatcherOptions.deliver({ text: undefined, mediaUrl: "/tmp/photo.png" });
+            await dispatcherOptions.deliver({ text: "here is the photo" });
+            return { counts: {} };
+          },
+        ),
+      },
+      media: { saveMediaBuffer: vi.fn() },
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/lucy-session.jsonl"),
+        recordInboundSession,
+      },
+    } as unknown as PluginRuntime["channel"];
+    const session = createMockSession();
+
+    await handleLucyInboundMessage({
+      cfg: {
+        channels: { lucy: { userCenterDomain: "user-center.lucy.run" } },
+      } as OpenClawConfig,
+      account: createAccount(),
+      channelRuntime: runtime,
+      inbound: { version: 1, text: "send a photo" },
+      session: session as unknown as Parameters<typeof handleLucyInboundMessage>[0]["session"],
+      userId: "user_demo",
+      cuk: "cuk_demo_user",
+      cdi: "2080563661542787073",
+    });
+
+    const types = publishSpy.mock.calls.map(([params]) => params.type);
+    const finalCount = types.filter((t) => t === "assistant.final").length;
+    const completeCount = types.filter((t) => t === "assistant.complete").length;
+    expect(finalCount).toBe(2);
+    expect(completeCount).toBe(1);
+    expect(types[types.length - 1]).toBe("assistant.complete");
   });
 
   it("hydrates inbound media and publishes assistant.final with media descriptor", async () => {

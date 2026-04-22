@@ -223,6 +223,10 @@ export const LucyMachineEventTypeSchema = z.enum([
   "assistant.start",
   "assistant.partial",
   "assistant.final",
+  // Run-level terminator: emitted exactly once per inbound message after the
+  // reply dispatcher resolves (success or error). Clients use this to know
+  // the agent turn is fully done.
+  "assistant.complete",
   "reasoning.partial",
   "reasoning.final",
   "tool.start",

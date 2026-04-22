@@ -457,7 +457,8 @@ export async function handleLucyInboundMessage(params: {
   let activeToolName: string | undefined;
   const runIdRef: { current?: string } = {};
 
-  await runInLucyInboundContext(
+  try {
+    await runInLucyInboundContext(
     {
       sourceMessageId: inbound.messageId!,
       cuk: params.cuk,
@@ -542,6 +543,23 @@ export async function handleLucyInboundMessage(params: {
         });
       },
       onToolStart: async ({ name }) => {
+        // Consecutive tool calls without an intervening assistant message
+        // would otherwise leak the prior tool.start without a matching
+        // tool.end. Close the previous tool first so every tool.start has
+        // a paired tool.end.
+        if (activeToolName) {
+          await publishLucyMachineEvent({
+            session: params.session,
+            userId: params.userId,
+            cuk: params.cuk,
+            cdi: params.cdi,
+            type: "tool.end",
+            sourceMessageId: inbound.messageId,
+            runId,
+            sessionKey: route.sessionKey,
+            toolName: activeToolName,
+          });
+        }
         activeToolName = name?.trim() || undefined;
         await publishLucyMachineEvent({
           session: params.session,
@@ -584,19 +602,49 @@ export async function handleLucyInboundMessage(params: {
     },
   });
     },
-  );
-
-  if (activeToolName) {
+    );
+  } catch (err) {
+    // Emit error event BEFORE the finally block publishes assistant.complete
+    // so the contract "complete is the last event for this run" holds even
+    // on fatal dispatcher errors (TypeError, missing dependency, etc.).
+    // Block-level errors are still handled by dispatcherOptions.onError;
+    // this catches anything that escapes that callback.
     await publishLucyMachineEvent({
       session: params.session,
       userId: params.userId,
       cuk: params.cuk,
       cdi: params.cdi,
-      type: "tool.end",
+      type: "error",
       sourceMessageId: inbound.messageId,
       runId,
       sessionKey: route.sessionKey,
-      toolName: activeToolName,
+      text: `inbound dispatch failed: ${String(err)}`,
+    });
+    throw err;
+  } finally {
+    if (activeToolName) {
+      await publishLucyMachineEvent({
+        session: params.session,
+        userId: params.userId,
+        cuk: params.cuk,
+        cdi: params.cdi,
+        type: "tool.end",
+        sourceMessageId: inbound.messageId,
+        runId,
+        sessionKey: route.sessionKey,
+        toolName: activeToolName,
+      });
+      activeToolName = undefined;
+    }
+    await publishLucyMachineEvent({
+      session: params.session,
+      userId: params.userId,
+      cuk: params.cuk,
+      cdi: params.cdi,
+      type: "assistant.complete",
+      sourceMessageId: inbound.messageId,
+      runId,
+      sessionKey: route.sessionKey,
     });
   }
 }
@@ -841,16 +889,11 @@ export async function startLucyGateway(ctx: LucyGatewayContext): Promise<void> {
           `[lucy] status patch lastOutboundAt=${outboundAt} (after inbound dispatch) subject=${msg.subject}`,
         );
       } catch (err) {
+        // The error event is emitted by handleLucyInboundMessage's inner
+        // catch (which guarantees ordering before assistant.complete).
+        // Outer catch only logs + updates status to avoid double-publish.
         updateLucyStatus(ctx, { lastError: String(err) });
         ctx.log?.error?.(`[lucy] inbound dispatch failed: ${String(err)}`);
-        await publishLucyMachineEvent({
-          session,
-          userId,
-          cuk,
-          cdi,
-          type: "error",
-          text: `inbound dispatch failed: ${String(err)}`,
-        });
       }
     });
     ctx.log?.info?.(

@@ -298,7 +298,7 @@ channels:
 
 1. 检查重启票据是否存在：`cat ~/.lucy/identity/restart-ticket.json`
 2. 检查网关日志中的 NATS 连接日志
-3. 手动发送测试消息验证 NATS 连接：`openclaw lucy demo-chat --text "test"`
+3. 手动发送测试消息验证 NATS 连接：`pnpm exec tsx extensions/lucy/scripts/assistant-complete-probe.ts`
 
 ### 信号 4：重启循环（无限重启）
 
